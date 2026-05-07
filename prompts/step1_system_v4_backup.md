@@ -145,7 +145,7 @@ For numeric and temporal entities, ALSO provide `metadata` field with structured
 
 **Currency** — `{"unit": "<currency name>", "value": <number>, "ISO4217": "<3-letter ISO 4217 code>"}`. Example "500 zł" → `{"unit": "Polish złoty", "value": 500, "ISO4217": "PLN"}`. "100 USD" → `{"unit": "US Dollar", "value": 100, "ISO4217": "USD"}`. "20 euro" → `{"unit": "Euro", "value": 20, "ISO4217": "EUR"}`
 
-**Date** — `{"timex": "<ISO 8601 YYYY-MM-DD or pattern>", "value": "<actual date YYYY-MM-DD>"}`. Use `XXXX` for unspecified parts. `value` is OPTIONAL — fill ONLY when context provides enough info to resolve. Examples: "5 maja 2025" → `{"timex": "2025-05-05", "value": "2025-05-05"}` (full date). "maj" (no year, no day) → `{"timex": "XXXX-05"}` (timex only, omit value — don't guess year). "12 kwietnia" (no year) → `{"timex": "XXXX-04-12"}` only — do NOT fabricate "2026-04-12" unless article context indicates the year.
+**Date** — `{"timex": "<ISO 8601 YYYY-MM-DD or pattern>", "value": "<actual date YYYY-MM-DD>"}`. Use `XXXX` for unspecified parts. Example "5 maja 2025" → `{"timex": "2025-05-05", "value": "2025-05-05"}`. "12 kwietnia" (no year) → `{"timex": "XXXX-04-12", "value": "2026-04-12"}` (assume current/next year)
 
 **DateTime** — `{"timex": "YYYY-MM-DDTHH:MM:SS", "value": "<resolved>"}`. Example "5 maja 2025 o 10:30" → `{"timex": "2025-05-05T10:30:00", "value": "2025-05-05 10:30:00"}`
 
@@ -171,7 +171,7 @@ For numeric and temporal entities, ALSO provide `metadata` field with structured
 
 **Time** — `{"timex": "Thh:mm:ss", "value": "hh:mm:ss"}`. Example "14:30" → `{"timex": "T14:30:00", "value": "14:30:00"}`
 
-**Volume** — `{"unit": "Milliliter"|"Liter"|"CubicMeter"|"Cup"|"Tablespoon"|"Teaspoon"|"Pint"|"Quart"|"Gallon"|"Unspecified", "value": <number>}`. Example "200 ml" → `{"unit": "Milliliter", "value": 200}`. "1 litr" → `{"unit": "Liter", "value": 1}`. "1 filiżanka" → `{"unit": "Cup", "value": 1}`. "łyżka", "łyżeczka" → `{"unit": "Tablespoon"/"Teaspoon", "value": 1}`
+**Volume** — `{"unit": "Milliliter"|"Liter"|"CubicMeter"|"Cup"|"Tablespoon"|"Teaspoon"|"Pint"|"Quart"|"Gallon"|"Unspecified", "value": <number>}`. Example "200 ml" → `{"unit": "Milliliter", "value": 200}`. "1 litr" → `{"unit": "Liter", "value": 1}`
 
 **Weight** — `{"unit": "Gram"|"Kilogram"|"Milligram"|"MetricTon"|"Pound"|"Ounce"|"Stone"|"Unspecified", "value": <number>}`. Example "500 g" → `{"unit": "Gram", "value": 500}`. "2 kg" → `{"unit": "Kilogram", "value": 2}`
 
@@ -180,38 +180,8 @@ For numeric and temporal entities, ALSO provide `metadata` field with structured
 - Convert text forms to numbers: "trzydzieści" → 30, "dwadzieścia pięć" → 25, "ósmy" → 8 (offset)
 - Keep `unit` strings exact as listed above (case-sensitive)
 - For currency, always include ISO4217 if known (PLN, USD, EUR, GBP, JPY, CHF, etc.)
-- For ambiguous dates without year, FILL `timex` with `XXXX` patterns and OMIT `value`. Do NOT fabricate years that aren't in the article — e.g. "maj" → `{timex: "XXXX-05"}` (no value). Only fill `value` when article actually states the year.
+- For ambiguous dates without year, assume current year (2026); for dates that already passed in current year, use next year
 - Omit metadata entirely for types not in the list (Person, Organization, Product, Skill etc.)
-
-### CRITICAL: ONLY use metadata fields listed for that specific type
-
-Each type has its OWN metadata schema. Do NOT mix fields from different schemas.
-
-- **Number**: ONLY `{numberKind, value}`. NO `offset`, NO `relativeTo`, NO `minimum/maximum`.
-- **NumberRange**: ONLY `{rangeKind, minimum, maximum}`. NO `value`, NO `numberKind`.
-- **Ordinal**: ONLY `{offset, relativeTo, value}` — `value` is the ordinal text ("first").
-- **Date**: ONLY `{timex, value}`. NO `unit`, NO `offset`, NO `maximum`, NO `numberKind`.
-- **DateTime**: ONLY `{timex, value}`. Same as Date.
-- **Time**: ONLY `{timex, value}`.
-- **DateRange**: ONLY `{timex, value}` OR `{rangeKind: "Number", minimum: <year>, maximum: <year>}` for year ranges. NOT both.
-- **TimeRange / DateTimeRange**: ONLY `{timex, value}`.
-- **SetTemporal**: ONLY `{timex, value: "not resolved"}`. NO offset/relativeTo.
-- **Temporal**: **OMIT METADATA ENTIRELY** — Temporal has no Azure metadata schema. Just `{name, type: "Temporal", category: ...}` (no metadata field).
-- **Currency**: ONLY `{unit, value, ISO4217}`.
-- **Percentage / Age / Length / Height / Volume / Weight / Speed / Temperature / Area**: ONLY `{unit, value}`. NO ISO4217, NO timex, NO offset.
-- **Information** (data size like KB/MB only): ONLY `{unit, value}`. For NON-data-size Information (diseases, anatomy, laws, concepts) → OMIT METADATA.
-
-If you cannot resolve a quantity to a number — OMIT the entity entirely or use the parent type without metadata. Never fill `value: null` or `unit: "Unspecified"` when you can simply skip metadata.
-
-### What NOT to extract
-
-To keep entities meaningful, do NOT extract:
-- Adjectives parsed as numbers ("2-składnikowe", "5-dniowy") — these are word forms, not standalone Number entities. Skip them.
-- Generic words "jesień", "wiosna", "lato", "zima" without specific year context → if relevant to article context, use Temporal but **omit metadata**. Otherwise skip.
-- Generic "rano", "wieczór", "noc" without specific time → skip OR Temporal without metadata.
-- Caloric content ("200 kcal") — calories are NOT data size; treat as `Number` with `{numberKind: "Integer", value: 200}` OR skip.
-- "URL" as a placeholder word (not actual web address) — skip.
-- Unit words alone ("filiżanka", "łyżka") without numeric prefix — skip.
 
 ## DISAMBIGUATION RULES
 
@@ -326,30 +296,6 @@ To keep entities meaningful, do NOT extract:
 
 ❌ Wrong: "Polak" → Information
 ✅ Correct: "Polak" → PersonType (nationality / group)
-
-❌ Wrong: "jesień" → Temporal with metadata `{timex: "XXXX-autumn-XXXX", offset: 0, relativeTo: "Current"}`
-✅ Correct: "jesień" → Temporal **without metadata** (Temporal has no Azure metadata schema). Or skip if not contextually important.
-
-❌ Wrong: "2-składnikowe" → Number with metadata `{numberKind: "Integer", offset: 0, relativeTo: "Start"}`
-✅ Correct: SKIP this entity entirely (it's an adjective form, not a standalone number)
-
-❌ Wrong: "maj" → Date with metadata `{timex: "XXXX-05-XX", maximum: 5, offset: 0, relativeTo: "Current"}` (extra fields not in Date schema)
-✅ Correct: "maj" → Date with metadata `{timex: "XXXX-05"}` only (omit `value` when year/day are unknown — don't fabricate "2026-05" if article doesn't say so). Or skip the entity if context doesn't make it meaningful.
-
-❌ Wrong: "1 filiżanka" → Volume with metadata `{unit: "Unspecified", value: 1}`
-✅ Correct: "1 filiżanka" → Volume with metadata `{unit: "Cup", value: 1}` (use exact Cup unit)
-
-❌ Wrong: "200 kcal" → Information with metadata `{unit: "Unspecified", value: 200}`
-✅ Correct: "200 kcal" → Number with metadata `{numberKind: "Integer", value: 200}` (calories are NOT data size; Information data-size is for KB/MB/GB only)
-
-❌ Wrong: "domowa siłownia" → Product
-✅ Correct: "domowa siłownia" → Structural (a built/arranged space, like a home gym room)
-
-❌ Wrong: extract every word "URL" as URL type
-✅ Correct: only extract actual web addresses like "https://example.com" as URL
-
-❌ Wrong: any quantity entity with `unit: "Unspecified"` when better unit exists
-✅ Correct: pick most specific unit OR omit metadata entirely if unsure
 
 ## RULES
 - Extract semantically important entities; quality over quantity

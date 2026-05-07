@@ -145,7 +145,7 @@ For numeric and temporal entities, ALSO provide `metadata` field with structured
 
 **Currency** — `{"unit": "<currency name>", "value": <number>, "ISO4217": "<3-letter ISO 4217 code>"}`. Example "500 zł" → `{"unit": "Polish złoty", "value": 500, "ISO4217": "PLN"}`. "100 USD" → `{"unit": "US Dollar", "value": 100, "ISO4217": "USD"}`. "20 euro" → `{"unit": "Euro", "value": 20, "ISO4217": "EUR"}`
 
-**Date** — `{"timex": "<ISO 8601 YYYY-MM-DD or pattern>", "value": "<actual date YYYY-MM-DD>"}`. Use `XXXX` for unspecified parts. `value` is OPTIONAL — fill ONLY when context provides enough info to resolve. Examples: "5 maja 2025" → `{"timex": "2025-05-05", "value": "2025-05-05"}` (full date). "maj" (no year, no day) → `{"timex": "XXXX-05"}` (timex only, omit value — don't guess year). "12 kwietnia" (no year) → `{"timex": "XXXX-04-12"}` only — do NOT fabricate "2026-04-12" unless article context indicates the year.
+**Date** — `{"timex": "<ISO 8601 YYYY-MM-DD or pattern>", "value": "<actual date YYYY-MM-DD>"}`. Use `XXXX` for unspecified parts. Example "5 maja 2025" → `{"timex": "2025-05-05", "value": "2025-05-05"}`. "12 kwietnia" (no year) → `{"timex": "XXXX-04-12", "value": "2026-04-12"}` (assume current/next year)
 
 **DateTime** — `{"timex": "YYYY-MM-DDTHH:MM:SS", "value": "<resolved>"}`. Example "5 maja 2025 o 10:30" → `{"timex": "2025-05-05T10:30:00", "value": "2025-05-05 10:30:00"}`
 
@@ -180,7 +180,7 @@ For numeric and temporal entities, ALSO provide `metadata` field with structured
 - Convert text forms to numbers: "trzydzieści" → 30, "dwadzieścia pięć" → 25, "ósmy" → 8 (offset)
 - Keep `unit` strings exact as listed above (case-sensitive)
 - For currency, always include ISO4217 if known (PLN, USD, EUR, GBP, JPY, CHF, etc.)
-- For ambiguous dates without year, FILL `timex` with `XXXX` patterns and OMIT `value`. Do NOT fabricate years that aren't in the article — e.g. "maj" → `{timex: "XXXX-05"}` (no value). Only fill `value` when article actually states the year.
+- For ambiguous dates without year, assume current year (2026); for dates that already passed in current year, use next year
 - Omit metadata entirely for types not in the list (Person, Organization, Product, Skill etc.)
 
 ### CRITICAL: ONLY use metadata fields listed for that specific type
@@ -333,8 +333,8 @@ To keep entities meaningful, do NOT extract:
 ❌ Wrong: "2-składnikowe" → Number with metadata `{numberKind: "Integer", offset: 0, relativeTo: "Start"}`
 ✅ Correct: SKIP this entity entirely (it's an adjective form, not a standalone number)
 
-❌ Wrong: "maj" → Date with metadata `{timex: "XXXX-05-XX", maximum: 5, offset: 0, relativeTo: "Current"}` (extra fields not in Date schema)
-✅ Correct: "maj" → Date with metadata `{timex: "XXXX-05"}` only (omit `value` when year/day are unknown — don't fabricate "2026-05" if article doesn't say so). Or skip the entity if context doesn't make it meaningful.
+❌ Wrong: "maj" → Date with metadata `{timex: "XXXX-05-XX", maximum: 5, offset: 0, relativeTo: "Current"}`
+✅ Correct: "maj" → Date with metadata `{timex: "XXXX-05", value: "2026-05"}` (only timex + value; no maximum/offset/relativeTo)
 
 ❌ Wrong: "1 filiżanka" → Volume with metadata `{unit: "Unspecified", value: 1}`
 ✅ Correct: "1 filiżanka" → Volume with metadata `{unit: "Cup", value: 1}` (use exact Cup unit)

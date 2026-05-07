@@ -79,11 +79,69 @@ TYPE_TO_CATEGORY: dict[str, tuple[str, str]] = {
 }
 
 
+# Dozwolone pola metadata per typ (Azure spec).
+# Model bywa, że dorzuca pola z innego sub-schema (np. offset/relativeTo do Number).
+# Cleanup gwarantuje że zachowamy tylko semantycznie poprawne pola.
+METADATA_FIELDS_BY_TYPE: dict[str, set[str]] = {
+    # unit + value
+    "Age":          {"unit", "value"},
+    "Area":         {"unit", "value"},
+    "Length":       {"unit", "value"},
+    "Height":       {"unit", "value"},
+    "Volume":       {"unit", "value"},
+    "Weight":       {"unit", "value"},
+    "Speed":        {"unit", "value"},
+    "Temperature":  {"unit", "value"},
+    "Percentage":   {"unit", "value"},
+    "Duration":     {"unit", "value"},
+    # Currency: + ISO4217
+    "Currency":     {"unit", "value", "ISO4217"},
+    # Number: numberKind + value
+    "Number":       {"numberKind", "value"},
+    # NumberRange: rangeKind + minimum + maximum
+    "NumberRange":  {"rangeKind", "minimum", "maximum"},
+    # Ordinal
+    "Ordinal":      {"offset", "relativeTo", "value"},
+    # Date/Time/Range
+    "Date":         {"timex", "value"},
+    "DateTime":     {"timex", "value"},
+    "Time":         {"timex", "value"},
+    "DateRange":    {"timex", "value", "rangeKind", "minimum", "maximum"},
+    "TimeRange":    {"timex", "value"},
+    "DateTimeRange":{"timex", "value"},
+    "SetTemporal":  {"timex", "value"},
+    # Information (data size only): unit + value. Inne Information bez metadata.
+    "Information":  {"unit", "value"},
+    # Pozostałe typy: brak metadata
+}
+
+
+def _clean_metadata(entity_type: str, metadata: dict | None) -> dict | None:
+    """Zostaw tylko pola dozwolone dla danego typu. Odrzuć resztę."""
+    if not metadata:
+        return None
+    allowed = METADATA_FIELDS_BY_TYPE.get(entity_type)
+    if not allowed:
+        return None  # ten typ nie ma metadata schema → odrzuć całość
+    cleaned = {k: v for k, v in metadata.items() if k in allowed}
+    # odrzuć fałszywe wypełnienia: unit:"Unspecified" + brak innych info
+    if cleaned.get("unit") == "Unspecified" and len(cleaned) <= 2 and not cleaned.get("ISO4217"):
+        # zostaw `value` ale wyzeruj fałszywą jednostkę
+        cleaned.pop("unit", None)
+    return cleaned or None
+
+
 def enrich_entity(entity: dict) -> dict:
-    """Dodaj pola `category` i `strength` na podstawie `type`."""
+    """Dodaj pola `category` i `strength`; oczyść `metadata` do dozwolonych pól per typ."""
     t = entity.get("type", "Other")
     cat, strength = TYPE_TO_CATEGORY.get(t, ("Other", "weak"))
-    return {**entity, "category": cat, "strength": strength}
+    out = {**entity, "category": cat, "strength": strength}
+    cleaned_md = _clean_metadata(t, entity.get("metadata"))
+    if cleaned_md is not None:
+        out["metadata"] = cleaned_md
+    else:
+        out.pop("metadata", None)  # usuń metadata jeśli było puste/zabronione
+    return out
 
 
 def dedup_entities(entities: list[dict]) -> list[dict]:
