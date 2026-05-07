@@ -88,7 +88,7 @@ python3 -u scripts/run_full.py --limit 0 --concurrency 8                    # au
 python3 -u scripts/run_full.py --limit 0 --concurrency 8 --tag v6_baseline   # final_results/<ts>__v6_baseline/
 
 # Dashboard Streamlit (analiza wyników z final_results/)
-streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8502
+streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501
 
 # Pojedyncze fazy
 python3 -u scripts/run_step1.py --limit 100 --concurrency 8

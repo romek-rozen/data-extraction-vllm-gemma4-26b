@@ -3,3 +3,6 @@ trafilatura
 xgrammar
 requests
 tiktoken
+streamlit
+pandas
+plotly
