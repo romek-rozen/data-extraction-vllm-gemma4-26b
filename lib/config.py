@@ -19,7 +19,7 @@ TEXT_TRUNCATE_LIMIT = 80000
 MAX_ARTICLE_TOKENS = 20000
 
 # vLLM server (OpenAI-compat)
-VLLM_BASE_URL = "http://localhost:8000/v1"
+VLLM_BASE_URL = "http://localhost:8001/v1"
 VLLM_MODEL = "/model"  # ścieżka mountowana w kontenerze, override przez env
 
 # Sampling — Google defaults dla Gemma 4 (INSTRUCTIONS_FROM_CLAUDE.md sekcja "Sampling parameters")
