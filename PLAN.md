@@ -48,7 +48,7 @@ Walidacja two-step pipeline (entity extraction + SEO meta) na Gemma 4 26B A4B NV
 
 **Decision:** Domyślnie A. Niżej tylko jeśli B/C wyraźnie lepsze.
 
-### Phase 4: Prompt iteration ⏳
+### Phase 4: Prompt iteration ✅
 **Cel:** szlifować prompty na podstawie obserwacji z Phase 2–3.
 
 - Add/remove few-shot.
@@ -102,4 +102,4 @@ Network Volume 100GB, pobrać `nvidia/Gemma-4-26B-A4B-NVFP4`, skopiować kod, sm
 
 ## Status faz
 
-Phase 0 ✅ • Phase 1 ✅ • Phase 2 ✅ • Phase 3 ✅ • Phase 2 ⏳ • Phase 3 ⏳ • Phase 4 ⏳ • Phase 5 ⏳ • Phase 6 ⏳ • Phase 7–9 ⏳
+Phase 0 ✅ • Phase 1 ✅ • Phase 2 ✅ • Phase 3 ✅ • Phase 4 ✅ • Phase 2 ⏳ • Phase 3 ⏳ • Phase 4 ⏳ • Phase 5 ⏳ • Phase 6 ⏳ • Phase 7–9 ⏳

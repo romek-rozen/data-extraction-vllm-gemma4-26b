@@ -69,16 +69,16 @@ For "junkey" category: return entities: []
 - asset: cryptocurrency, stock, ETF, bond, investment commodity, fund, financial instrument (bitcoin, Tesla stock, gold, S&P 500, NFT BAYC)
 - law: statute, legal act, regulation, EU directive, code (GDPR, labor code, VAT act)
 - nationality: nationality, ethnic, religious or political group (Pole, Catholic, liberal)
-- structure: single human-made object: building, bridge, stadium, airport, highway, monument (Eiffel Tower, A4 highway, Stadion Narodowy, Chopin Airport, Palace of Culture). NOT anatomical body parts (spine, liver, immune system → use "other"). NOT abstract diagrams or pyramids (food pyramid → use "other")
+- structure: single human-made object: building, bridge, stadium, airport, highway, monument (Eiffel Tower, A4 highway, Stadion Narodowy, Chopin Airport, Palace of Culture)
 - substance: vitamin, mineral, drug, active ingredient, supplement, chemical, hormone, enzyme — generic substance name without brand (vitamin C, magnesium, omega-3, creatine, paracetamol, catalase)
 - disease: disease, health condition, disorder (diabetes, COVID-19, depression, ADHD, hypertension, insomnia)
 - therapy: named therapy, diet, medical procedure, diagnostic test, treatment protocol (chemotherapy, CBT psychotherapy, MRI, ketogenic diet, Mediterranean diet, acupuncture, cataract surgery)
 - species: animal/plant species, dog/cat breed, tree (Labrador, oak, honeybee, rose, carp)
 - dish: dish, meal, drink, recipe or regional cuisine (rosół, pizza margherita, sushi, latte coffee, Italian cuisine)
 - ingredient: culinary ingredient, raw food product, spice, dish component (wheat flour, cream, basil, horseradish, onion, dill)
-- discipline: sports discipline, martial art, fitness training type or exercise (football, MMA, crossfit, yoga, squat). ONLY sports/fitness — NOT academic disciplines (dietetics, anatomy, biomechanics → use "other"). NOT health metrics (BMI → use "other")
+- discipline: sports discipline, martial art, training type or exercise (football, MMA, crossfit, yoga, squat)
 - activity: named practice, process or human activity that is NOT a sports discipline or medical therapy (meditation, intermittent fasting, bread baking, SEO optimization, magnesium supplementation). Yoga/MMA/crossfit → discipline. Psychotherapy/keto diet → therapy
-- other: when entity is semantically important but no specific type fits. **Use for:** anatomical body parts (kręgosłup/spine, wątroba/liver, układ odpornościowy/immune system, white blood cells), academic disciplines (dietetics, anatomy, biomechanics), abstract scientific terms (oxidative stress as concept, food pyramid as diagram), abstract concepts (carbon footprint, superfoods). Pick "other" over inventing a wrong category, but if two specific types fit — pick the better one
+- other: ONLY when entity is semantically important but no type fits clearly. NOT a fallback for uncertainty — if two types fit, pick better one
 
 DO NOT INVENT NEW TYPES. Use "other" only when nothing else fits.
 
@@ -111,17 +111,6 @@ When entity could fit multiple types, follow these tests:
 - Geographic/administrative area → location (Warsaw, Mazowsze, Vistula)
 - Single built object → structure (Stadion Narodowy, A4 highway)
 - Test: "Can you draw it on a map as area, or is it a single point?"
-
-### structure vs other (anatomy / abstract)
-- Anatomical body parts (kręgosłup, wątroba, mięśnie, układ odpornościowy, białe krwinki) → other (NOT structure — structure is built objects, not biology)
-- Abstract diagrams or models (piramida diety śródziemnomorskiej / food pyramid) → other
-- Built infrastructure / oczyszczalnia ścieków / building → structure
-
-### discipline vs other (academic field)
-- Sports/fitness/martial art (yoga, MMA, crossfit, plank, squat, jogging) → discipline
-- Academic field, science, scholarly area (dietetyka, anatomia, biomechanika, dietetics, biochemistry) → other
-- Health metric/index (BMI, BMR, RMR) → other
-- Test: "Could you find it in a 'Sports' section?" → discipline. "Is it a field of study?" → other
 
 ### work vs event
 - Created creative content → work (book "Lalka", film "Inception", album "Thriller")
@@ -156,42 +145,6 @@ When entity could fit multiple types, follow these tests:
 ❌ Wrong: "meditation" → "discipline"
 ✅ Correct: "meditation" → "activity"
 (not a sports discipline; it's a contemplative practice)
-
-❌ Wrong: "kręgosłup" → "structure"
-✅ Correct: "kręgosłup" → "other"
-(spine is anatomy, not a built structure)
-
-❌ Wrong: "wątroba" / "białe krwinki" / "układ odpornościowy" → "structure"
-✅ Correct: → "other"
-(anatomical body parts have no specific type — fallback to "other")
-
-❌ Wrong: "biomechanika" → "discipline"
-✅ Correct: "biomechanika" → "other"
-(academic field, not a sport)
-
-❌ Wrong: "dietetyka" → "discipline"
-✅ Correct: "dietetyka" → "other"
-(academic discipline / field of study, not a sport)
-
-❌ Wrong: "BMI" → "discipline"
-✅ Correct: "BMI" → "other"
-(health index, not a sport)
-
-❌ Wrong: "tortownica" → "structure"
-✅ Correct: "tortownica" → "product"
-(consumer product / kitchen tool, not a built structure)
-
-❌ Wrong: "stres oksydacyjny" → "therapy"
-✅ Correct: "stres oksydacyjny" → "disease"
-(health condition, not a treatment)
-
-❌ Wrong: "Forest Stewardship Council" / "FSC" → "brand"
-✅ Correct: → "organization"
-(certifying body / NGO, not a marketing brand)
-
-❌ Wrong: "chusteczki nawilżane" / "pieluchy" → "other"
-✅ Correct: → "product"
-(consumer products with no brand — still products)
 
 ## RULES
 - Maximum 15 most important entities (not exhaustive list — most relevant to article topic)

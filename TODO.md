@@ -44,12 +44,16 @@ Actionable checklist per faza. Plan: `PLAN.md`. Spec: `INSTRUCTIONS_FROM_CLAUDE.
 - [x] **Decyzja D13:** idempotencja przez `url_hash` skip, nie deterministic rerun
 - [x] Wyniki: `result/phase3_compare.md`
 
-## Phase 4 — Prompt iteration
+## Phase 4 — Prompt iteration ✅
 
-- [ ] Lista najczęściej mylonych typów (substance↔therapy, discipline↔activity, brand↔organization)
-- [ ] Add/remove few-shot per znalezione problemy
-- [ ] Po każdej zmianie: 50 URL + eyeball
-- [ ] Wersjonowanie promptów (`prompts/step1_system_v2.md`, ...)
+- [x] `scripts/analyze_entity_quality.py` — top N nazw per typ z entity_layer.jsonl
+- [x] Identified problems: anatomia w `structure`, academic w `discipline`, products w `other`, condition w `therapy`, NGO w `brand`
+- [x] Prompt v2 z wzmocnionymi disambiguation rules + 9 nowych negative examples
+- [x] Versioning: `prompts/step1_system_v1.md` (backup), `step1_system.md` (= v2 aktywne)
+- [x] Run 50 URL z v2: 50/50 OK
+- [x] `scripts/compare_prompt_versions.py`: **6 problemów → 0**, 570/597 encji stabilnych
+- [x] **Decyzja D14:** v2 aktywne; koszt +24% tokenów systemu (cached → amortyzowany)
+- [x] Wyniki: `result/phase4_compare.md` + `result/phase4_entity_quality.md`
 
 ## Phase 5 — End-to-end 500–1000 URL
 
@@ -73,7 +77,7 @@ Actionable checklist per faza. Plan: `PLAN.md`. Spec: `INSTRUCTIONS_FROM_CLAUDE.
 
 ## Otwarte decyzje
 
-- [ ] `include_tables` w trafilatura (Phase 1 A/B)
-- [ ] `max_model_len` (16384 wystarczy czy mniej dla większego batcha?)
-- [ ] `max_num_seqs` na Sparku (start 8, do testu 16)
+- [x] `include_tables` w trafilatura (Phase 1 A/B)
+- [x] `max_model_len` (16384 wystarczy czy mniej dla większego batcha?)
+- [x] `max_num_seqs` na Sparku (start 8, do testu 16)
 - [ ] Streamlit dashboard (Phase 5+, opcjonalny)

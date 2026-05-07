@@ -120,6 +120,21 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Co by dało prawdziwy determinizm:** `temperature=0.0` (greedy) + `seed=N` + concurrency=1 + jeden sprzętowy run. Niepraktyczne dla 21M URL na 1× 5090. Pomijamy.
 - **Status:** final. Architektura idempotencji opiera się na `url_hash` filter, nie na deterministycznym output.
 
+### D14: Prompt Step 1 v2 — refinement na podstawie Phase 4 analizy 100 URL
+- **Co:** wzbogacony `prompts/step1_system.md` o:
+  - Wzmocniony opis `structure`: "NOT anatomical body parts (spine, liver, immune system → use 'other')"
+  - Wzmocniony opis `discipline`: "ONLY sports/fitness — NOT academic disciplines (dietetics, anatomy, biomechanics → use 'other')"
+  - Rozbudowany opis `other`: jasne wskazania na anatomię, akademic fields, abstract concepts
+  - Nowe disambiguation rules: `structure vs other (anatomy)`, `discipline vs other (academic)`
+  - 9 nowych negatywnych przykładów (kręgosłup, biomechanika, BMI, tortownica, FSC, chusteczki, stres oksydacyjny...)
+- **Empiryczna walidacja (50 URL wspólnych):**
+  - Wszystkie zidentyfikowane problemy zniknęły: **6 → 0**
+  - Stabilność typowania: 570 encji ten sam typ w v1 i v2, tylko 27 zmieniło typ (głównie te problematyczne)
+  - Brak nowych problemów: `other` w v2 zawiera tylko sensowne wpisy (anatomia, akademic, abstrakty)
+- **Koszt:** prompt urósł z 11 654 → 14 121 znaków, **2929 → 3628 tokenów (+24%)**. Cache amortyzuje to przy >1 requeście.
+- **Backups:** `prompts/step1_system_v1.md` (oryginał) i `prompts/step1_system_v2.md` (= obecny aktywny).
+- **Status:** v2 aktywne. Future iteracje: nazwa pliku stays `step1_system.md`, kolejne wersje w `_vN.md`.
+
 ### D11: Flat layout (`lib/` + `scripts/`) zamiast `src/`
 - **Co:** Moduły importowalne w `lib/`, runnable entry points w `scripts/`. Brak `pyproject.toml`, brak `pip install -e .`.
 - **Dlaczego:** `src/` layout to standard dla **bibliotek dystrybuowanych przez PyPI** — wymusza pakowanie i niesie boilerplate. Nasz projekt to research pipeline odpalany lokalnie, nie biblioteka. Flat jest spójny z siostrzanym projektem `mateusz-g-json-vs-flat/`.
