@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.config import (  # noqa: E402
+    DEFAULT_CONCURRENCY,
     MAX_TOKENS_STEP1,
     RESULT_DIR,
     SAMPLING_STEP1,
@@ -42,8 +43,8 @@ def process_one(client: VLLMClient, system: str, schema: dict, article: dict) ->
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--concurrency", type=int, default=1,
-                        help="Równoległe requesty do vLLM (serwer batchuje natywnie)")
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY,
+                        help="Równoległe requesty do vLLM (serwer batchuje natywnie). Default z lib.config.")
     parser.add_argument("--out", default=str(RESULT_DIR / "entity_layer.jsonl"))
     parser.add_argument("--websites", default=str(WEBSITES_DIR))
     parser.add_argument("--no-skip", action="store_true",

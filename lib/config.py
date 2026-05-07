@@ -7,6 +7,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 WEBSITES_DIR = PROJECT_ROOT / "websites"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 RESULT_DIR = PROJECT_ROOT / "result"
+FINAL_RESULT_DIR = PROJECT_ROOT / "final_results"
 
 # Twardy limit znaków (safety net przed tokenizacją). 80k ≈ ~20k tokenów —
 # znacznie powyżej max obserwowanego (5979) z Phase 1. Dla outlierów odsiewa
@@ -17,13 +18,17 @@ TEXT_TRUNCATE_LIMIT = 80000
 # Empirycznie zmierzony chat-template overhead (system v6 + user template + chat wrappers): 5009 tok stałe.
 # Theoretical max: 32768 - 4000 (output) - 500 (safety) - 5009 (overhead) ≈ 23259.
 # Praktyczny limit 15000 — agresywne ścinanie, bo statystyki na 469 ok runach pokazują:
-#   text_tokens p50=645, p75=1671, p90=6611, p95=10048, p99=13472.
+# text_tokens p50=645, p75=1671, p90=6611, p95=10048, p99=13472.
 # 15000 dotyka ~1% artykułów (p99 region), daje ~8 GB safety margin pod zmiany prompt/schema.
 MAX_ARTICLE_TOKENS = 15000
 
 # vLLM server (OpenAI-compat)
 VLLM_BASE_URL = "http://localhost:8001/v1"
 VLLM_MODEL = "/model"  # ścieżka mountowana w kontenerze, override przez env
+
+# Concurrency — pipeline ≤ vLLM --max-num-seqs (obecnie 8 w scripts/start_vllm.sh).
+# Override per uruchomienie przez --concurrency flag w skryptach run_*.py.
+DEFAULT_CONCURRENCY = 8
 
 # Sampling — Phase 3 walidacja (decyzja D12 w DECISIONS.md):
 # - Step 1: A (Google default) — schema xgrammar dominuje, temperatura nie wpływa

@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.config import (  # noqa: E402
+    DEFAULT_CONCURRENCY,
     MAX_TOKENS_STEP2,
     RESULT_DIR,
     SAMPLING_STEP2,
@@ -43,7 +44,7 @@ def process_one(client, system, schema, article, entity_record):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--entity-layer", default=str(RESULT_DIR / "entity_layer.jsonl"))
     parser.add_argument("--out", default=str(RESULT_DIR / "final.jsonl"))
     parser.add_argument("--websites", default=str(WEBSITES_DIR))

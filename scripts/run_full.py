@@ -26,6 +26,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from lib.config import DEFAULT_CONCURRENCY  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("full")
 
@@ -49,7 +52,7 @@ def step(name: str, cmd: list[str], log_file: Path | None = None) -> int:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="0 = wszystkie URL")
-    parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--out-dir", default=None,
                         help="Custom katalog wyjściowy (override). Default: final_results/<timestamp>/")
     parser.add_argument("--tag", default=None,

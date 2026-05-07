@@ -14,10 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+from lib.config import DEFAULT_CONCURRENCY  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("pipeline")
-
-ROOT = Path(__file__).parent.parent
 
 
 def run(cmd: list[str]) -> int:
@@ -29,7 +31,7 @@ def run(cmd: list[str]) -> int:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=10, help="0 = wszystkie URL z websites/")
-    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--no-skip", action="store_true")
     parser.add_argument("--out-dir", default=None,
                         help="Katalog na wyniki (domyślnie result/). Tworzony automatycznie.")
