@@ -28,7 +28,7 @@ Walidacja two-step pipeline (entity extraction + SEO meta) na Gemma 4 26B A4B NV
 - Mediana skrócenia >40% bez utraty treści → markdown MANDATORY.
 - Tabele istotnie zmieniają output Step 1/2 → włączyć; w przeciwnym razie OFF.
 
-### Phase 2: Two-step vs one-step ✅ (one-step pominięty, walidacja przez 100 URL run)
+### Phase 2: Two-step vs one-step 
 **Cel:** udowodnić, że two-step daje lepsze wyniki niż one-step.
 
 - Implementować Step 1 (entity extraction + language) i Step 2 (SEO meta) — schematy + prompty z `INSTRUCTIONS_FROM_CLAUDE.md`.

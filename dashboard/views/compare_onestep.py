@@ -136,7 +136,39 @@ def _load_run(run_name: str) -> dict:
             meta = json.loads(mp.read_text())
         except json.JSONDecodeError:
             pass
-    return {"onestep": onestep, "step1": step1, "step2": step2, "meta": meta, "dir": d}
+    # Glanceable artefakty z finalize_compare.py
+    summary_txt = (d / "summary.txt").read_text(encoding="utf-8") if (d / "summary.txt").exists() else None
+    run_meta = {}
+    rm = d / "run_meta.json"
+    if rm.exists():
+        try:
+            run_meta = json.loads(rm.read_text())
+        except json.JSONDecodeError:
+            pass
+    return {
+        "onestep": onestep, "step1": step1, "step2": step2,
+        "meta": meta, "dir": d,
+        "summary_txt": summary_txt, "run_meta": run_meta,
+    }
+
+
+def _ts_wall(records: dict) -> tuple[str | None, str | None, float | None]:
+    """Ground truth wall time z `ts` w rekordach JSONL (first ok → last ok)."""
+    from datetime import datetime as _dt
+    ts_list = []
+    for r in records.values():
+        if not r.get("ok"):
+            continue
+        ts = r.get("ts")
+        if ts:
+            try:
+                ts_list.append(_dt.fromisoformat(ts))
+            except ValueError:
+                pass
+    if not ts_list:
+        return None, None, None
+    a, b = min(ts_list), max(ts_list)
+    return a.isoformat(timespec="seconds"), b.isoformat(timespec="seconds"), (b - a).total_seconds()
 
 
 def _compute_metrics(payload: dict) -> dict:
@@ -301,6 +333,11 @@ def render(filters: dict, data: dict):
         f"dir: `{payload['dir'].name}`"
     )
 
+    # ---------- summary.txt (jeśli finalize_compare wygenerował) ----------
+    if payload.get("summary_txt"):
+        with st.expander("📄 summary.txt (glanceable — z finalize_compare.py)", expanded=True):
+            st.code(payload["summary_txt"], language="text")
+
     # ---------- VERDICT BANNER (zawsze widoczny) ----------
     _render_verdict_banner(M)
 
@@ -308,7 +345,7 @@ def render(filters: dict, data: dict):
     with tabs[0]:
         _render_verdict_tab(M)
     with tabs[1]:
-        _render_speed_tab(M, meta)
+        _render_speed_tab(M, meta, payload)
     with tabs[2]:
         _render_quality_tab(M, payload)
     with tabs[3]:
@@ -427,7 +464,7 @@ def _render_verdict_tab(M: dict):
 
 # ---------------- tab: SPEED ----------------
 
-def _render_speed_tab(M: dict, meta: dict):
+def _render_speed_tab(M: dict, meta: dict, payload: dict):
     history = meta.get("history") or []
     n_two_segm = sum(1 for h in history if h.get("phase") == "twostep")
     n_one_segm = sum(1 for h in history if h.get("phase") == "onestep")
@@ -461,6 +498,37 @@ def _render_speed_tab(M: dict, meta: dict):
         f"ETA = ekstrapolacja z bieżącego throughputu (concurrency={meta.get('concurrency', '?')}, "
         f"DGX Spark). Prod target: RTX 5090 — ~2-3× szybciej."
     )
+
+    # ---------- ground truth z `ts` w JSONL ----------
+    one_first, one_last, one_ts_wall = _ts_wall(payload["onestep"])
+    s1_first, s1_last, s1_ts_wall = _ts_wall(payload["step1"])
+    s2_first, s2_last, s2_ts_wall = _ts_wall(payload["step2"])
+
+    if any([one_ts_wall, s1_ts_wall, s2_ts_wall]):
+        st.subheader("Wall time — ground truth z `ts` w JSONL (first ok → last ok)")
+        st.caption(
+            "Niezależny od meta i logów. Wymaga rekordów z polem `ts` (dodane od commita "
+            "`b0690d0`; starsze runy mogą nie mieć i tu zobaczysz `—`)."
+        )
+        rows = []
+        for label, first, last, wall, n in [
+            ("one-step", one_first, one_last, one_ts_wall,
+             sum(1 for r in payload["onestep"].values() if r.get("ok") and r.get("ts"))),
+            ("two-step Step 1", s1_first, s1_last, s1_ts_wall,
+             sum(1 for r in payload["step1"].values() if r.get("ok") and r.get("ts"))),
+            ("two-step Step 2", s2_first, s2_last, s2_ts_wall,
+             sum(1 for r in payload["step2"].values() if r.get("ok") and r.get("ts"))),
+        ]:
+            rows.append({
+                "phase": label,
+                "first_ts": first or "—",
+                "last_ts": last or "—",
+                "wall (s)": round(wall, 1) if wall else "—",
+                "wall (h:m:s)": _fmt_hms(wall) if wall else "—",
+                "n_with_ts": n,
+                "throughput URL/h": round(n / wall * 3600, 0) if (wall and n) else "—",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     # ---------- historia segmentów ----------
     if history:
