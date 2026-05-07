@@ -5,7 +5,13 @@ websites/
 result/
 final_result/
 final_result_v6/
+final_result_v6_b/
+final_results/
 benchmark_results/
+
+# Scraper output (lokalne)
+websites_new/
+scraper_logs/
 
 # Python
 __pycache__/

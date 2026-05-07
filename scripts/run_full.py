@@ -3,21 +3,27 @@
 Tworzy katalog wyjściowy, robi pełen run, generuje raport. Wszystko w jednym
 poleceniu — idealne do tmux.
 
+Domyślny output: final_results/<YYYY-MM-DD_HH-MM-SS>/ (pełna ścieżka absolutna).
+Można nadpisać --out-dir albo dodać sufiks --tag <name> (final_results/<ts>__<tag>/).
+
 Użycie:
-    python3 scripts/run_full.py --limit 0 --concurrency 8 --out-dir final_result
-    python3 scripts/run_full.py --limit 50 --concurrency 4 --out-dir result_test
+    python3 scripts/run_full.py --limit 0 --concurrency 8                  # auto timestamp
+    python3 scripts/run_full.py --limit 0 --concurrency 8 --tag v6_b       # final_results/<ts>__v6_b/
+    python3 scripts/run_full.py --limit 50 --concurrency 4 --out-dir foo   # custom
 """
 
 import argparse
 import logging
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("full")
 
 ROOT = Path(__file__).parent.parent
+DEFAULT_RESULTS_DIR = ROOT / "final_results"
 
 
 def step(name: str, cmd: list[str], log_file: Path | None = None) -> int:
@@ -37,14 +43,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="0 = wszystkie URL")
     parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--out-dir", required=True, help="np. final_result")
+    parser.add_argument("--out-dir", default=None,
+                        help="Custom katalog wyjściowy (override). Default: final_results/<timestamp>/")
+    parser.add_argument("--tag", default=None,
+                        help="Sufiks dla auto-timestamp dir, np. --tag v6 → final_results/<ts>__v6/")
     parser.add_argument("--samples", type=int, default=15, help="Liczba sample'i w raporcie")
     parser.add_argument("--no-skip", action="store_true")
     args = parser.parse_args()
 
-    out_dir = Path(args.out_dir)
-    if not out_dir.is_absolute():
-        out_dir = ROOT / out_dir
+    if args.out_dir:
+        out_dir = Path(args.out_dir)
+        if not out_dir.is_absolute():
+            out_dir = ROOT / out_dir
+    else:
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        name = f"{ts}__{args.tag}" if args.tag else ts
+        out_dir = DEFAULT_RESULTS_DIR / name
     out_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {out_dir}")
 
