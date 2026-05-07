@@ -135,6 +135,38 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Backups:** `prompts/step1_system_v1.md` (oryginał) i `prompts/step1_system_v2.md` (= obecny aktywny).
 - **Status:** v2 aktywne. Future iteracje: nazwa pliku stays `step1_system.md`, kolejne wersje w `_vN.md`.
 
+### D15: Pełna migracja na Azure NER taxonomy + category + strength + metadata
+- **Co:** porzucamy własną 23-typową taksonomię domain-specific. Adoptujemy [Microsoft Azure AI Language Service NER schema](https://learn.microsoft.com/en-us/azure/ai-services/language-service/named-entity-recognition/concepts/named-entity-categories) — 51 typów, production-grade, language-agnostic.
+- **Pola w encji:**
+  - `name` (string) — nazwa encji w języku artykułu
+  - `type` (enum 51) — Azure type (exact case, np. `Person`, `Organization`, `City`, `Temperature`)
+  - `category` (deterministic mapping) — 11 high-level Azure kategorii (Person, Organization, Location, Event, Product, Quantity, DateTime, Skill, Information, PersonType, Address, Email, IpAddress, PhoneNumber, URL)
+  - `strength` (deterministic) — `strong` (linkable do Wikidata/KB, ma stabilny ID) lub `weak` (kontekstowo-zależna). Inspired DBMS strong/weak entity (Hotel/Room analogy).
+  - `metadata` (optional) — structured resolution dla 18 typów Quantity/DateTime: `unit` (Celsius, Gram, Liter, Hour...), `value` (number), `ISO4217` (Currency), `timex` (Date/Time/Set ISO 8601), `numberKind`, `rangeKind`, `minimum`, `maximum`, `offset`, `relativeTo`.
+- **Dlaczego Azure zamiast naszej:**
+  - Production-grade taksonomia od Microsoft (lat doświadczenia, miliony zapytań)
+  - Hierarchia 2-poziomowa (category → type) ułatwia querying
+  - Metadata daje structured normalization: "180°C" → `{Celsius, 180}`, "5 maja 2025" → `{timex: "2025-05-05"}`. Gotowe do agregacji/filtrowania bez parsowania tekstu.
+  - Eliminuje subiektywne wybory między custom typami (substance vs ingredient vs Product)
+- **Co straciliśmy:** granularność dla domain-specific (witamina C i iPhone — oba `Product`). Trade-off zaakceptowany — dla 21M URL na różnych domenach Azure jest spójniejsze niż domain-specific.
+- **Mapping starych typów:**
+  - substance, ingredient, dish, species, asset, work → `Product` (broad)
+  - disease, therapy (jeśli koncept), law, anatomy, abstract → `Information`
+  - therapy (jako procedure), discipline, activity → `Skill`
+  - brand → `Organization`
+  - technology → `ComputingProduct`
+  - nationality → `PersonType`
+- **Empiryczna walidacja (50 URL, concurrency 8, 172s = 3,44 s/req):**
+  - 50/50 OK
+  - 1 355 encji, median 23 per artykuł (wzrost z ~15 w v2 — model wyciąga więcej dzięki Quantity/DateTime jednostkom)
+  - 106/1355 (7,8%) encji z metadata
+  - **100% metadata fill rate** dla: Duration (22/22), NumberRange (20/20), Volume (16/16), Number (10/10), Weight (9/9), Temperature (9/9), Percentage (8/8), Length (4/4), Date (2/2)
+  - Strong/Weak ratio: 77% / 23%
+  - Top categories: Product 74%, Information 10%, Skill 3%, Quantity 6%, DateTime 2%
+- **Koszt promptu:** 3 628 → 6 940 tokenów (+91%). Cache prefix caching amortyzuje. Output per Step 1 ~ 200-400 tokenów (zależnie od liczby quantity entities).
+- **Backups:** `prompts/step1_system_v{1,2,3,3_no_meta,4}.md`, `prompts/schema_step1_v{2,3,4}.json`. Aktualne aktywne — bez sufiksu (= v4).
+- **Status:** final. Drobne błędy w metadata (`"jesień"` → Temporal z surowym timex; `"2-składnikowe"` → Number z niepotrzebnym offset) do iteracji w Phase 5 jeśli będzie potrzeba.
+
 ### D11: Flat layout (`lib/` + `scripts/`) zamiast `src/`
 - **Co:** Moduły importowalne w `lib/`, runnable entry points w `scripts/`. Brak `pyproject.toml`, brak `pip install -e .`.
 - **Dlaczego:** `src/` layout to standard dla **bibliotek dystrybuowanych przez PyPI** — wymusza pakowanie i niesie boilerplate. Nasz projekt to research pipeline odpalany lokalnie, nie biblioteka. Flat jest spójny z siostrzanym projektem `mateusz-g-json-vs-flat/`.
