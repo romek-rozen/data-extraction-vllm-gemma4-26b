@@ -166,6 +166,40 @@ python3 scripts/compare_onestep_vs_twostep.py --limit 20 --only twostep
 python3 scripts/run_onestep.py --limit 20 --concurrency 4
 ```
 
+#### Duży run na losowej próbce + resume
+
+```bash
+# 1000 URL losowych, reprezentatywna próbka (seed default=42, reproducible)
+python3 -u scripts/compare_onestep_vs_twostep.py --random --limit 1000 --concurrency 4 --tag baseline2000
+# → final_results/<ts>__compare_onestep__baseline2000/
+#     ├── compare_meta.json   ← seed + limit + concurrency (auto-resume użyje tego samego sample'u)
+#     ├── twostep.log         ← log Step 1 + Step 2
+#     ├── onestep.log         ← log one-step
+#     ├── entity_layer.jsonl  ← two-step Step 1 output
+#     ├── final.jsonl         ← two-step Step 2 output
+#     ├── onestep.jsonl       ← one-step output
+#     └── report.md           ← raport speed + quality
+
+# Wznawianie po crashu / Ctrl-C / odłączeniu sesji
+python3 -u scripts/compare_onestep_vs_twostep.py --resume final_results/<ts>__compare_onestep__baseline2000
+
+# To samo co wyżej, ale wybór najnowszego runu (jeśli masz tylko jeden compare):
+python3 -u scripts/compare_onestep_vs_twostep.py --resume "$(ls -td final_results/*__compare_onestep* | head -1)"
+```
+
+Resume jest **idempotentny po `url_hash`** — pominięte URL-e to te z `ok=True` w plikach JSONL; failsy są ponawiane. Seed wczytywany z `compare_meta.json`, więc `--random` nie rozjedzie zestawu URL między pierwszym runem a resume. Możesz puścić w `tmux` lub `nohup` i przerwać/wznowić w dowolnym momencie:
+
+```bash
+# tmux: bezpieczne do długich runów
+tmux new -s compare
+python3 -u scripts/compare_onestep_vs_twostep.py --random --limit 2000 --concurrency 4 --tag baseline2000
+# Ctrl+B D — odłącz
+# tmux attach -t compare — wróć
+
+# tylko analiza istniejących wyników bez ponownego uruchamiania pipeline'ów:
+python3 scripts/compare_onestep_vs_twostep.py --resume final_results/<dir> --analyze-only
+```
+
 Mierzy speed (wall, latency p50/p95, output tokens, attempts) i quality (language match, category match, Jaccard encji name+type, długości pól SEO). Decision rule: **speedup ≥ 1.5× wall AND category match ≥ 90% AND Jaccard ≥ 0.5** → kandydat do prod. Wyniki w dashboardzie pod widokiem "One-step vs Two-step". Two-step pozostaje defaultem dopóki one-step nie spełni reguły.
 
 Wyniki w `final_results/<ts>__<tag>/`:
