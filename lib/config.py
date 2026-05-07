@@ -14,9 +14,10 @@ RESULT_DIR = PROJECT_ROOT / "result"
 TEXT_TRUNCATE_LIMIT = 80000
 
 # Limit tokenów artykułu — twardy budżet pod max-model-len 32768:
-# 32768 - system_prompt (~2929) - user_template (37) - output (4000) - bufor (~800) ≈ 25000.
-# Phase 1 max obserwowany artykuł = 5979 tok → 25000 to ~4× headroom dla outlierów.
-MAX_ARTICLE_TOKENS = 25000
+# Step 1 system prompt v6 = 4708 tok (zmierzone tokenizerem, nie 2929 jak stary komentarz).
+# 32768 - output (4000) - system (4708) - template (17) - chat_tags (~30) - bufor (~500) ≈ 23513.
+# Round down do 23000. Phase 1 max obserwowany artykuł = 5979 tok → ~3.8× headroom.
+MAX_ARTICLE_TOKENS = 23000
 
 # vLLM server (OpenAI-compat)
 VLLM_BASE_URL = "http://localhost:8001/v1"
