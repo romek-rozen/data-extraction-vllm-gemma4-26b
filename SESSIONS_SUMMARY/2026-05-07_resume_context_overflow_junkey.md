@@ -128,7 +128,17 @@ e9a440e  vLLM: --max-model-len 24576→32768 + MAX_ARTICLE_TOKENS 17000→25000
 8562d48  vllm_client: timeout 180→300s
 2d71c9e  config: DEFAULT_CONCURRENCY w lib/config.py — single source of truth
 37c86d7  prompt step1 v6.1: rozszerzona definicja junkey o strony taksonomii / indeksów
+1b1b8c3  SESSIONS_SUMMARY: ten plik (zapis stanu)
+4336015  config: DEFAULT_CONCURRENCY 8→4 + dashboard logs view + .claude/ w gitignore
 ```
+
+## Stan końcowy sesji
+
+- Pipeline run aktywny w tmux `benchmark:0` — `final_results/2026-05-07_16-37-26/` na 4530 URL @ concurrency=4 (DEFAULT_CONCURRENCY zmienione na 4 dla zmniejszenia presji RAM/swap przy równoległym scraperze + vLLM).
+- 2 scrapery równolegle (`benchmark:1` graniteks, `benchmark:2` biznews 8605 URL ~33%). Output bezpośrednio do `websites/`.
+- vLLM stable (max_model_len 32768, GPU 93% util, 67°C, RAM 114/121 GB z swap 7 GB — głównie unified memory model+KV cache).
+- Streamlit dashboard z nowym widokiem "Pipeline log" (live podgląd aktywnego runa) — odpalany w osobnym oknie tmux po zakończeniu sesji.
+- Plan migracji na RTX PRO 6000 (96 GB) zapisany w `PLANS/rtx_pro_6000_optimization.md` — batch 64-80 realny, znacznie szybciej niż RTX 5090.
 
 ## Co dalej
 
