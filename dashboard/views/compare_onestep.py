@@ -580,6 +580,46 @@ def _render_quality_tab(M: dict, payload: dict):
     st.dataframe(pd.DataFrame(seo_rows), use_container_width=True, hide_index=True)
     st.caption("Targety SEO: title 50-60, meta_description 140-160, h1 ~50-80, summary ~250-350.")
 
+    # ---------- Category mismatches (one vs two) ----------
+    st.subheader("Kategorie — one-step vs two-step")
+    st.caption(
+        "Liczba URL gdzie one-step i two-step **przypisały tę samą / inną kategorię**. "
+        "Tabela mismatchy: które kategorie one-step zwraca w miejscu two-step (sygnał gdzie "
+        "prompty się rozjeżdżają)."
+    )
+
+    cat_pairs: list[tuple[str, str]] = []
+    for r in M["per_url_rows"]:
+        cat_pairs.append((r.get("category_one") or "(brak)",
+                          r.get("category_two") or "(brak)"))
+    if cat_pairs:
+        df_pairs = pd.DataFrame(cat_pairs, columns=["one_step", "two_step"])
+        # Mismatchy → grupowanie
+        mismatch = df_pairs[df_pairs["one_step"] != df_pairs["two_step"]]
+        if not mismatch.empty:
+            grouped = (
+                mismatch.groupby(["two_step", "one_step"]).size()
+                .reset_index(name="count")
+                .sort_values("count", ascending=False)
+            )
+            st.markdown(f"**Mismatchy: {len(mismatch)}/{len(df_pairs)} URL "
+                        f"({100*len(mismatch)/len(df_pairs):.1f}%)**")
+            st.dataframe(grouped, use_container_width=True, hide_index=True, height=280)
+        else:
+            st.success("✅ Wszystkie URL: identyczna kategoria w one-step i two-step.")
+
+        # Top kategorie zwracane przez each
+        st.markdown("**Top 15 kategorii — agreement:**")
+        cat_one = df_pairs["one_step"].value_counts().head(15)
+        cat_two = df_pairs["two_step"].value_counts().head(15)
+        all_cats = sorted(set(cat_one.index) | set(cat_two.index))
+        comp = pd.DataFrame({
+            "one-step": [cat_one.get(c, 0) for c in all_cats],
+            "two-step": [cat_two.get(c, 0) for c in all_cats],
+        }, index=all_cats).sort_values("two-step", ascending=False).head(15)
+        st.bar_chart(comp, height=300, use_container_width=True)
+        st.dataframe(comp, use_container_width=True)
+
     # Per-URL table
     st.subheader("Per-URL diff")
     if M["per_url_rows"]:
