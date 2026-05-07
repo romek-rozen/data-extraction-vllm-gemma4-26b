@@ -4,6 +4,7 @@ Wydzielone z run_step1.py / run_step2.py żeby ab_sampling.py mógł reużywać
 bez duplikacji logiki.
 """
 
+from datetime import datetime
 from typing import Any
 
 from lib.prompt_loader import build_step1_user, build_step2_user
@@ -200,6 +201,7 @@ def process_step1(
         "usage": res["usage"],
         "finish_reason": res.get("finish_reason"),
         "attempts": res.get("attempts", 1),
+        "ts": datetime.now().isoformat(timespec="seconds"),
     }
     if res["ok"] and res["parsed"]:
         raw = res["parsed"].get("entities", [])
@@ -258,6 +260,7 @@ def process_step2(
         "usage": res["usage"],
         "finish_reason": res.get("finish_reason"),
         "attempts": res.get("attempts", 1),
+        "ts": datetime.now().isoformat(timespec="seconds"),
     }
     if res["ok"] and res["parsed"]:
         record.update(res["parsed"])

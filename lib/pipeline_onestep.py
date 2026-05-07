@@ -7,6 +7,7 @@ lib/pipeline.py (TYPE_TO_CATEGORY, dedup_entities, enrich_entity).
 NIE modyfikuje istniejącego two-step — tylko dodaje równoległą ścieżkę.
 """
 
+from datetime import datetime
 from typing import Any
 
 from lib.pipeline import dedup_entities, enrich_entity
@@ -54,6 +55,7 @@ def process_onestep(
         "usage": res["usage"],
         "finish_reason": res.get("finish_reason"),
         "attempts": res.get("attempts", 1),
+        "ts": datetime.now().isoformat(timespec="seconds"),
     }
     if res["ok"] and res["parsed"]:
         parsed = res["parsed"]

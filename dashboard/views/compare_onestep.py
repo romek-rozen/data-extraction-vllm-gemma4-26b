@@ -91,6 +91,17 @@ def _stat(values: list[float]) -> dict:
     }
 
 
+def _fmt_hms(seconds: float) -> str:
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m > 0:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
 def _ok(v: float, threshold: float, mode: str = "ge") -> bool:
     if mode == "ge":
         return v >= threshold
@@ -417,16 +428,23 @@ def _render_verdict_tab(M: dict):
 # ---------------- tab: SPEED ----------------
 
 def _render_speed_tab(M: dict, meta: dict):
+    history = meta.get("history") or []
+    n_two_segm = sum(1 for h in history if h.get("phase") == "twostep")
+    n_one_segm = sum(1 for h in history if h.get("phase") == "onestep")
+
     st.subheader("Wall time + throughput")
     st.caption(
-        "**Wall time** = subprocess time z `compare_onestep_vs_twostep.py` (start skryptu → koniec). "
-        "Obejmuje load_articles, batchowanie, zwracanie wyników. Model **nie zwraca wall time** — "
-        "to zewnętrzny pomiar. Per-request `latency_s` (poniżej) to round-trip HTTP do vLLM."
+        "**Wall time** = subprocess time **sumowany przez wszystkie segmenty** "
+        "(każdy run / resume dopisuje segment do `compare_meta.json` → `history`). "
+        "Obejmuje load_articles, batchowanie, finalizację. Model **nie zwraca wall time** — "
+        "to nasz zewnętrzny pomiar. Per-request `latency_s` (poniżej) to round-trip HTTP do vLLM."
     )
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Wall one-step", f"{M['one_wall']:.1f}s")
-    c2.metric("Wall two-step", f"{M['two_wall']:.1f}s")
+    c1.metric("Wall one-step", f"{M['one_wall']:.1f}s",
+              help=f"suma {n_one_segm} segmentów")
+    c2.metric("Wall two-step", f"{M['two_wall']:.1f}s",
+              help=f"suma {n_two_segm} segmentów")
     c3.metric("Speedup wall", f"{M['speedup_wall']:.2f}×",
               delta=f"{(M['speedup_wall']-1)*100:+.0f}%")
     c4.metric("Speedup per-URL", f"{M['speedup_per_url']:.2f}×",
@@ -443,6 +461,29 @@ def _render_speed_tab(M: dict, meta: dict):
         f"ETA = ekstrapolacja z bieżącego throughputu (concurrency={meta.get('concurrency', '?')}, "
         f"DGX Spark). Prod target: RTX 5090 — ~2-3× szybciej."
     )
+
+    # ---------- historia segmentów ----------
+    if history:
+        st.subheader("Historia segmentów (każdy run / resume)")
+        st.caption(
+            "Wall time u góry = **suma segmentów**. Resume nie nadpisuje — kumuluje. "
+            "`przetworzono` = ile nowych OK rekordów dopisał ten segment (po dedupie po url_hash)."
+        )
+        rows = []
+        for i, h in enumerate(history, 1):
+            rows.append({
+                "#": i,
+                "phase": h.get("phase", "?"),
+                "started_at": h.get("started_at", "?"),
+                "ended_at": h.get("ended_at", "?"),
+                "wall (s)": round(float(h.get("wall_s", 0) or 0), 1),
+                "wall (h:m:s)": _fmt_hms(float(h.get("wall_s", 0) or 0)),
+                "ok before": h.get("ok_records_before", 0),
+                "ok after": h.get("ok_records_after", 0),
+                "+processed": h.get("ok_processed_in_segment", 0),
+                "rc": h.get("rc", "?"),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.subheader("Per-request latency (s) — z odpowiedzi vLLM")
     rows = []

@@ -120,11 +120,75 @@ def _usage_total_in(rec: dict) -> int:
 
 # ---------- runners ----------
 
+def _count_ok(path: Path) -> int:
+    """Liczba rekordów ok=True w JSONL (po dedupie po url_hash — ostatni wygrywa)."""
+    if not path.exists():
+        return 0
+    by_hash: dict[str, dict] = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            h = rec.get("url_hash")
+            if h:
+                by_hash[h] = rec
+    return sum(1 for r in by_hash.values() if r.get("ok"))
+
+
+def _record_segment(
+    meta_path: Path,
+    phase: str,
+    started_at: str,
+    ended_at: str,
+    wall_s: float,
+    n_records_before: int,
+    n_records_after: int,
+    rc: int,
+) -> None:
+    """Append wpis o segmencie wykonania do meta["history"] (atomowo)."""
+    meta: dict = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except json.JSONDecodeError:
+            meta = {}
+    history = meta.setdefault("history", [])
+    history.append({
+        "phase": phase,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "wall_s": round(wall_s, 2),
+        "ok_records_before": n_records_before,
+        "ok_records_after": n_records_after,
+        "ok_processed_in_segment": max(0, n_records_after - n_records_before),
+        "rc": rc,
+    })
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+
+def _total_wall_from_history(meta: dict, phase: str) -> float:
+    """Suma wall_s wszystkich segmentów dla danej fazy."""
+    return sum(
+        float(h.get("wall_s", 0) or 0)
+        for h in (meta.get("history") or [])
+        if h.get("phase") == phase
+    )
+
+
+def _segments_count(meta: dict, phase: str) -> int:
+    return sum(1 for h in (meta.get("history") or []) if h.get("phase") == phase)
+
+
 def step(name: str, cmd: list[str], log_file: Path) -> tuple[int, float]:
     logger.info(f"=== {name} ===")
     logger.info("RUN: " + " ".join(cmd))
     t0 = time.perf_counter()
-    with open(log_file, "w") as f:
+    # log file: 'a' żeby nie nadpisywać przy resume
+    with open(log_file, "a") as f:
+        f.write(f"\n=== Run started at {datetime.now().isoformat()} ===\n")
+        f.flush()
         rc = subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT).returncode
     dt = time.perf_counter() - t0
     logger.info(f"{name} done in {dt:.1f}s (rc={rc})")
@@ -132,9 +196,12 @@ def step(name: str, cmd: list[str], log_file: Path) -> tuple[int, float]:
 
 
 def run_twostep(out_dir: Path, limit: int, concurrency: int, no_skip: bool,
-                random_sample: bool, seed: int) -> float:
-    """Uruchom istniejący two-step pipeline (run_pipeline.py). Zwraca total wall time (s)."""
+                random_sample: bool, seed: int, meta_path: Path) -> float:
+    """Uruchom two-step pipeline. Wall time tego segmentu zapisany do meta['history']."""
     log = out_dir / "twostep.log"
+    final_jsonl = out_dir / "final.jsonl"
+    n_before = _count_ok(final_jsonl)
+    started = datetime.now().isoformat(timespec="seconds")
     cmd = ["python3", "-u", "scripts/run_pipeline.py",
            "--limit", str(limit),
            "--concurrency", str(concurrency),
@@ -144,15 +211,20 @@ def run_twostep(out_dir: Path, limit: int, concurrency: int, no_skip: bool,
     if no_skip:
         cmd.append("--no-skip")
     rc, dt = step("Two-step pipeline", cmd, log)
+    ended = datetime.now().isoformat(timespec="seconds")
+    n_after = _count_ok(final_jsonl)
+    _record_segment(meta_path, "twostep", started, ended, dt, n_before, n_after, rc)
     if rc != 0:
         logger.error(f"Two-step FAILED — patrz {log}")
     return dt
 
 
 def run_onestep(out_dir: Path, limit: int, concurrency: int, no_skip: bool,
-                random_sample: bool, seed: int) -> float:
+                random_sample: bool, seed: int, meta_path: Path) -> float:
     log = out_dir / "onestep.log"
     onestep_jsonl = out_dir / "onestep.jsonl"
+    n_before = _count_ok(onestep_jsonl)
+    started = datetime.now().isoformat(timespec="seconds")
     cmd = ["python3", "-u", "scripts/run_onestep.py",
            "--limit", str(limit),
            "--concurrency", str(concurrency),
@@ -162,12 +234,25 @@ def run_onestep(out_dir: Path, limit: int, concurrency: int, no_skip: bool,
     if no_skip:
         cmd.append("--no-skip")
     rc, dt = step("One-step pipeline", cmd, log)
+    ended = datetime.now().isoformat(timespec="seconds")
+    n_after = _count_ok(onestep_jsonl)
+    _record_segment(meta_path, "onestep", started, ended, dt, n_before, n_after, rc)
     if rc != 0:
         logger.error(f"One-step FAILED — patrz {log}")
     return dt
 
 
 # ---------- analysis ----------
+
+def _load_meta(out_dir: Path) -> dict:
+    p = out_dir / "compare_meta.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError:
+        return {}
+
 
 def analyze(out_dir: Path, twostep_wall: float, onestep_wall: float,
             random_sample: bool = False, seed: int = 42) -> Path:
@@ -353,12 +438,31 @@ def analyze(out_dir: Path, twostep_wall: float, onestep_wall: float,
     A("## Speed")
     A("")
     A("**Wall time** = subprocess wall time z tego skryptu (start runnera → koniec). "
-      "Obejmuje load_articles, batchowanie, finalizację. Model **nie zwraca wall time** — "
-      "to nasz zewnętrzny pomiar. Per-request `latency_s` (poniżej) to round-trip HTTP do vLLM.")
+      "Obejmuje load_articles, batchowanie, finalizację. **Sumowane przez wszystkie segmenty** "
+      "(każdy run / resume = osobny segment dopisany do `compare_meta.json` → `history`). "
+      "Model nie zwraca wall time — to nasz zewnętrzny pomiar.")
     A("")
-    A(f"- one-step wall: **{onestep_wall:.1f}s** → throughput **{thr_one:.0f} URL/h**")
-    A(f"- two-step wall: **{twostep_wall:.1f}s** → throughput **{thr_two:.0f} URL/h**")
+    meta_now = _load_meta(out_dir)
+    n_two_segm = _segments_count(meta_now, "twostep")
+    n_one_segm = _segments_count(meta_now, "onestep")
+    A(f"- one-step wall: **{onestep_wall:.1f}s** ({n_one_segm} seg) → throughput **{thr_one:.0f} URL/h**")
+    A(f"- two-step wall: **{twostep_wall:.1f}s** ({n_two_segm} seg) → throughput **{thr_two:.0f} URL/h**")
     A(f"- ratio two/one (im wyżej tym one-step szybszy): **{speedup_wall:.2f}×**")
+    A("")
+    if meta_now.get("history"):
+        A("### Historia segmentów")
+        A("")
+        A("| # | phase | started → ended | wall (s) | przetworzono | rc |")
+        A("|---|---|---|---|---|---|")
+        for i, h in enumerate(meta_now["history"], 1):
+            span = f"{h.get('started_at','?')} → {h.get('ended_at','?')}"
+            A(f"| {i} | {h.get('phase','?')} | {span} | "
+              f"{h.get('wall_s', 0):.1f} | "
+              f"+{h.get('ok_processed_in_segment', 0)} (→{h.get('ok_records_after', 0)}) | "
+              f"{h.get('rc', '?')} |")
+        A("")
+        A("`przetworzono` = `+nowe_ok_w_tym_segmencie (→nowy_łączny_count_ok)`. Pozwala wyliczyć "
+          "ile artykułów ten konkretny resume domyślił (użyteczne do per-segment throughputu).")
     A("")
     A("- **Per-URL latency (mean / p50 / p95) [s]:**")
     A("")
@@ -504,31 +608,71 @@ def main():
         meta["seed"] = use_seed
         meta_path.write_text(json.dumps(meta, indent=2))
 
-    twostep_wall = 0.0
-    onestep_wall = 0.0
-
     if not args.analyze_only:
         # Kolejność: najpierw two-step potem one-step (lub odwrotnie — bez znaczenia
         # dla pomiaru per-URL latency; wall time każda ścieżka mierzona oddzielnie).
+        # Każdy segment dopisuje się do meta["history"] — resume kumuluje się prawidłowo.
         if args.only in ("both", "twostep"):
-            twostep_wall = run_twostep(out_dir, args.limit, args.concurrency, args.no_skip,
-                                       random_sample=use_random, seed=use_seed)
+            run_twostep(out_dir, args.limit, args.concurrency, args.no_skip,
+                        random_sample=use_random, seed=use_seed, meta_path=meta_path)
         if args.only in ("both", "onestep"):
-            onestep_wall = run_onestep(out_dir, args.limit, args.concurrency, args.no_skip,
-                                       random_sample=use_random, seed=use_seed)
+            run_onestep(out_dir, args.limit, args.concurrency, args.no_skip,
+                        random_sample=use_random, seed=use_seed, meta_path=meta_path)
 
-    if twostep_wall:
-        meta["twostep_wall_s"] = round(twostep_wall, 2)
-    if onestep_wall:
-        meta["onestep_wall_s"] = round(onestep_wall, 2)
+    # przeczytaj meta na nowo (segmenty mogły dodać się w runnerach)
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except json.JSONDecodeError:
+            pass
+
+    # Kompatybilność wstecz: stare runy mają flat twostep_wall_s/onestep_wall_s
+    # bez history. Dolej je jako pojedynczy segment placeholderem (raz).
+    legacy_two = float(meta.get("twostep_wall_s") or 0.0)
+    legacy_one = float(meta.get("onestep_wall_s") or 0.0)
+    history = meta.get("history") or []
+    has_two = any(h.get("phase") == "twostep" for h in history)
+    has_one = any(h.get("phase") == "onestep" for h in history)
+    if legacy_two and not has_two:
+        history.append({
+            "phase": "twostep", "started_at": "?", "ended_at": "?",
+            "wall_s": round(legacy_two, 2),
+            "ok_records_before": 0,
+            "ok_records_after": _count_ok(out_dir / "final.jsonl"),
+            "ok_processed_in_segment": _count_ok(out_dir / "final.jsonl"),
+            "rc": 0, "legacy": True,
+        })
+    if legacy_one and not has_one:
+        history.append({
+            "phase": "onestep", "started_at": "?", "ended_at": "?",
+            "wall_s": round(legacy_one, 2),
+            "ok_records_before": 0,
+            "ok_records_after": _count_ok(out_dir / "onestep.jsonl"),
+            "ok_processed_in_segment": _count_ok(out_dir / "onestep.jsonl"),
+            "rc": 0, "legacy": True,
+        })
+    meta["history"] = history
+
+    # Total wall (sum segments) — to jest "ile zajęło wygenerowanie N artykułów łącznie".
+    twostep_wall = _total_wall_from_history(meta, "twostep")
+    onestep_wall = _total_wall_from_history(meta, "onestep")
+    meta["twostep_wall_s_total"] = round(twostep_wall, 2)
+    meta["onestep_wall_s_total"] = round(onestep_wall, 2)
+    meta["twostep_segments"] = _segments_count(meta, "twostep")
+    meta["onestep_segments"] = _segments_count(meta, "onestep")
+    # Zachowaj też flat keys dla wstecznej kompatybilności dashboardu
+    meta["twostep_wall_s"] = round(twostep_wall, 2)
+    meta["onestep_wall_s"] = round(onestep_wall, 2)
     meta["limit"] = args.limit
     meta["concurrency"] = args.concurrency
     meta["random_sample"] = use_random
     meta["seed"] = use_seed
     meta_path.write_text(json.dumps(meta, indent=2))
 
-    twostep_wall = twostep_wall or float(meta.get("twostep_wall_s") or 0.0)
-    onestep_wall = onestep_wall or float(meta.get("onestep_wall_s") or 0.0)
+    logger.info(
+        f"Total wall — twostep: {twostep_wall:.1f}s ({meta['twostep_segments']} segm) · "
+        f"onestep: {onestep_wall:.1f}s ({meta['onestep_segments']} segm)"
+    )
 
     analyze(out_dir, twostep_wall=twostep_wall, onestep_wall=onestep_wall,
             random_sample=use_random, seed=use_seed)
