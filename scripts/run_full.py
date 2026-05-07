@@ -6,10 +6,17 @@ poleceniu — idealne do tmux.
 Domyślny output: final_results/<YYYY-MM-DD_HH-MM-SS>/ (pełna ścieżka absolutna).
 Można nadpisać --out-dir albo dodać sufiks --tag <name> (final_results/<ts>__<tag>/).
 
+Resume:
+    --resume               # dokończ NAJNOWSZY run z final_results/
+    --resume <dir>         # dokończ konkretny run
+Pipeline jest idempotentny po url_hash — istniejące rekordy są pomijane.
+
 Użycie:
     python3 scripts/run_full.py --limit 0 --concurrency 8                  # auto timestamp
     python3 scripts/run_full.py --limit 0 --concurrency 8 --tag v6_b       # final_results/<ts>__v6_b/
     python3 scripts/run_full.py --limit 50 --concurrency 4 --out-dir foo   # custom
+    python3 scripts/run_full.py --resume                                   # wznów najnowszy
+    python3 scripts/run_full.py --resume final_results/2026-05-07_15-30-05__v6_full_2267
 """
 
 import argparse
@@ -47,11 +54,39 @@ def main():
                         help="Custom katalog wyjściowy (override). Default: final_results/<timestamp>/")
     parser.add_argument("--tag", default=None,
                         help="Sufiks dla auto-timestamp dir, np. --tag v6 → final_results/<ts>__v6/")
+    parser.add_argument("--resume", nargs="?", const="__latest__", default=None,
+                        help="Wznów istniejący run. Bez argumentu = najnowszy z final_results/. "
+                             "Z argumentem = konkretny katalog.")
     parser.add_argument("--samples", type=int, default=15, help="Liczba sample'i w raporcie")
     parser.add_argument("--no-skip", action="store_true")
     args = parser.parse_args()
 
-    if args.out_dir:
+    if args.resume:
+        if args.resume == "__latest__":
+            candidates = sorted(
+                (p for p in DEFAULT_RESULTS_DIR.iterdir() if p.is_dir()),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            ) if DEFAULT_RESULTS_DIR.exists() else []
+            if not candidates:
+                logger.error(f"Brak katalogów do wznowienia w {DEFAULT_RESULTS_DIR}")
+                sys.exit(2)
+            out_dir = candidates[0]
+            logger.info(f"Resume najnowszego: {out_dir.name}")
+        else:
+            out_dir = Path(args.resume)
+            if not out_dir.is_absolute():
+                out_dir = ROOT / out_dir
+            if not out_dir.exists():
+                logger.error(f"Katalog do wznowienia nie istnieje: {out_dir}")
+                sys.exit(2)
+        # Pokaż ile jest do dokończenia
+        ent = out_dir / "entity_layer.jsonl"
+        fin = out_dir / "final.jsonl"
+        ent_lines = sum(1 for _ in ent.open()) if ent.exists() else 0
+        fin_lines = sum(1 for _ in fin.open()) if fin.exists() else 0
+        logger.info(f"Resume status: entity_layer.jsonl={ent_lines} rec, final.jsonl={fin_lines} rec")
+    elif args.out_dir:
         out_dir = Path(args.out_dir)
         if not out_dir.is_absolute():
             out_dir = ROOT / out_dir
