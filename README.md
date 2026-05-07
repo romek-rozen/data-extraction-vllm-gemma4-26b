@@ -128,10 +128,25 @@ docker rm -f vllm-gemma4
 Po starcie vLLM, jedna komenda robi wszystko (mkdir + snapshot metrics + Step 1 + Step 2 + analiza):
 
 ```bash
+# zwykły run (auto timestamp)
+python3 -u scripts/run_full.py --limit 0 --concurrency 8
+# → final_results/2026-05-07_15-30-05/
+
+# z tagiem (łatwiej rozpoznać)
+python3 -u scripts/run_full.py --limit 0 --concurrency 8 --tag baseline
+# → final_results/2026-05-07_15-30-05__baseline/
+
+# wznów po crashu / Ctrl+C — pipeline jest idempotentny po url_hash
+python3 -u scripts/run_full.py --resume                                  # najnowszy z final_results/
+python3 -u scripts/run_full.py --resume final_results/<ts>__<tag>        # konkretny
+
+# stary tryb z custom katalogiem wciąż działa
 python3 -u scripts/run_full.py --out-dir final_result --limit 0 --concurrency 8
 ```
 
-Wyniki w `final_result/`:
+`--resume` pomija URL'e które mają już `ok=True` w `entity_layer.jsonl` / `final.jsonl`. Failsy są ponownie podejmowane.
+
+Wyniki w `final_results/<ts>__<tag>/`:
 - `entity_layer.jsonl` — Step 1 output (encje + category + strength + metadata)
 - `final.jsonl` — Step 2 output (title, meta_description, h1, article_summary)
 - `summary.md` — raport jakościowy + 15 sample'i

@@ -25,8 +25,12 @@ class JsonlReporter:
         with self._lock, open(self.path, "a", encoding="utf-8") as f:
             f.write(line)
 
-    def load_existing_hashes(self) -> set[str]:
-        """Zwróć set url_hash z dotychczasowego JSONL (idempotencja przy restarcie)."""
+    def load_existing_hashes(self, only_ok: bool = True) -> set[str]:
+        """Zwróć set url_hash z dotychczasowego JSONL (idempotencja przy restarcie).
+
+        Domyślnie (only_ok=True) bierze tylko rekordy z ok=True — pozwala resume ponowić failsy.
+        Z only_ok=False zachowuje stare zachowanie (wszystkie rekordy).
+        """
         if not self.path.exists():
             return set()
         hashes: set[str] = set()
@@ -34,6 +38,8 @@ class JsonlReporter:
             for line in f:
                 try:
                     rec = json.loads(line)
+                    if only_ok and not rec.get("ok", False):
+                        continue
                     h = rec.get("url_hash")
                     if h:
                         hashes.add(h)

@@ -84,8 +84,9 @@ python3 -c "from lib.data_loader import load_articles; \
   print(arts[0]['text'][:500])"
 
 # Pełen E2E (mkdir + snapshot + Step 1 + Step 2 + analiza)
-python3 -u scripts/run_full.py --limit 0 --concurrency 8                    # auto: final_results/<timestamp>/
+python3 -u scripts/run_full.py --limit 0 --concurrency 8                     # auto: final_results/<timestamp>/
 python3 -u scripts/run_full.py --limit 0 --concurrency 8 --tag v6_baseline   # final_results/<ts>__v6_baseline/
+python3 -u scripts/run_full.py --resume                                      # wznów najnowszy run (idempotencja po url_hash, fails są ponawiane)
 
 # Dashboard Streamlit (analiza wyników z final_results/)
 streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501
