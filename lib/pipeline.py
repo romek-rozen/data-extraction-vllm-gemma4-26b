@@ -132,15 +132,18 @@ def _clean_metadata(entity_type: str, metadata: dict | None) -> dict | None:
 
 
 def enrich_entity(entity: dict) -> dict:
-    """Dodaj pola `category` i `strength`; oczyść `metadata` do dozwolonych pól per typ."""
+    """Dodaj deterministyczne pola `category` i `strength` (mapowane po typie).
+
+    Schema v6: encja z modelu = `{name, type}`. Metadata zostały usunięte ze
+    schematu Step 1 dla deterministyczności i krótszego outputu (decyzja
+    podjęta po fail_truncated_at_max_tokens na artykule magnez-b6 — schema v5
+    z metadata generowała nawet 50+ encji × ~30 tok metadata, hit max_tokens).
+    Jeśli model i tak zwróci `metadata` (xgrammar additionalProperties), zostaje
+    zignorowane przez _clean_metadata (no-op).
+    """
     t = entity.get("type", "Other")
     cat, strength = TYPE_TO_CATEGORY.get(t, ("Other", "weak"))
-    out = {**entity, "category": cat, "strength": strength}
-    cleaned_md = _clean_metadata(t, entity.get("metadata"))
-    if cleaned_md is not None:
-        out["metadata"] = cleaned_md
-    else:
-        out.pop("metadata", None)  # usuń metadata jeśli było puste/zabronione
+    out = {"name": entity.get("name"), "type": t, "category": cat, "strength": strength}
     return out
 
 
@@ -196,6 +199,7 @@ def process_step1(
         "latency_s": round(res["latency_s"], 3),
         "usage": res["usage"],
         "finish_reason": res.get("finish_reason"),
+        "attempts": res.get("attempts", 1),
     }
     if res["ok"] and res["parsed"]:
         raw = res["parsed"].get("entities", [])
@@ -253,6 +257,7 @@ def process_step2(
         "latency_s": round(res["latency_s"], 3),
         "usage": res["usage"],
         "finish_reason": res.get("finish_reason"),
+        "attempts": res.get("attempts", 1),
     }
     if res["ok"] and res["parsed"]:
         record.update(res["parsed"])

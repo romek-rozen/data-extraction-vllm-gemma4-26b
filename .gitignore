@@ -4,6 +4,7 @@ websites/
 # Wyniki eksperymentów (lokalne)
 result/
 final_result/
+final_result_v6/
 benchmark_results/
 
 # Python

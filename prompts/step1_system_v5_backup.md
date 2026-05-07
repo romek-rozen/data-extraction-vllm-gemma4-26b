@@ -7,9 +7,6 @@ Detect the article's language and return ISO 639-1 code (pl, en, de, es, fr, it,
 Entity names MUST preserve the original language of the article (do not translate).
 Return ONLY a valid JSON object matching the schema. No markdown, no extra text.
 
-## OUTPUT BUDGET
-Maximum 60 entities per article. Quality over quantity. If the article has more potential entities, pick the most semantically important ones (named brands, products, named people, key concepts) and skip secondary mentions.
-
 ## CATEGORIES (choose exactly ONE)
 
 - Automotive: cars, motorization, car brands, parts, repairs, fuel
@@ -132,12 +129,87 @@ This is the Microsoft Azure AI Language Service NER schema, production-grade and
 
 DO NOT INVENT NEW TYPES. Use exact case (`Person`, not `person`). Maximum entities: focus on semantically important; quality over quantity.
 
-## What NOT to extract
+## ENTITY METADATA (Azure resolutions — structured normalization)
+
+For numeric and temporal entities, ALSO provide `metadata` field with structured resolution. This converts text forms ("eighty", "180°C", "5 maja 2025") into consistent machine-readable values, enabling downstream filtering, sorting and aggregation.
+
+**Fill `metadata` ONLY for these 18 types:** Age, Area, Currency, Date, DateTime, Duration, Information (when it represents data size like KB/MB/GB), Length, Number, NumberRange, Ordinal, Percentage, SetTemporal, Speed, Temperature, Time, Volume, Weight.
+
+**For all other types — omit `metadata` entirely.**
+
+### Metadata schemas per type
+
+**Age** — `{"unit": "Year"|"Month"|"Week"|"Day"|"Unspecified", "value": <number>}`. Example "25 lat" → `{"unit": "Year", "value": 25}`
+
+**Area** — `{"unit": "SquareMeter"|"SquareFoot"|"SquareKilometer"|"SquareCentimeter"|"Acre"|"Unspecified", "value": <number>}`. Example "50 m²" → `{"unit": "SquareMeter", "value": 50}`
+
+**Currency** — `{"unit": "<currency name>", "value": <number>, "ISO4217": "<3-letter ISO 4217 code>"}`. Example "500 zł" → `{"unit": "Polish złoty", "value": 500, "ISO4217": "PLN"}`. "100 USD" → `{"unit": "US Dollar", "value": 100, "ISO4217": "USD"}`. "20 euro" → `{"unit": "Euro", "value": 20, "ISO4217": "EUR"}`
+
+**Date** — `{"timex": "<ISO 8601 YYYY-MM-DD or pattern>", "value": "<actual date YYYY-MM-DD>"}`. Use `XXXX` for unspecified parts. `value` is OPTIONAL — fill ONLY when context provides enough info to resolve. Examples: "5 maja 2025" → `{"timex": "2025-05-05", "value": "2025-05-05"}` (full date). "maj" (no year, no day) → `{"timex": "XXXX-05"}` (timex only, omit value — don't guess year). "12 kwietnia" (no year) → `{"timex": "XXXX-04-12"}` only — do NOT fabricate "2026-04-12" unless article context indicates the year.
+
+**DateTime** — `{"timex": "YYYY-MM-DDTHH:MM:SS", "value": "<resolved>"}`. Example "5 maja 2025 o 10:30" → `{"timex": "2025-05-05T10:30:00", "value": "2025-05-05 10:30:00"}`
+
+**Duration** — `{"unit": "Second"|"Minute"|"Hour"|"Day"|"Week"|"Month"|"Year"|"Unspecified", "value": <number>}`. Example "30 minut" → `{"unit": "Minute", "value": 30}`. "2 godziny" → `{"unit": "Hour", "value": 2}`
+
+**Information** (only when representing data size) — `{"unit": "Bit"|"Byte"|"Kilobit"|"Kilobyte"|"Megabit"|"Megabyte"|"Gigabit"|"Gigabyte"|"Terabit"|"Terabyte"|"Petabit"|"Petabyte"|"Unspecified", "value": <number>}`. Example "30 MB" → `{"unit": "Megabyte", "value": 30}`. **For non-data Information (diseases, laws, anatomy), omit metadata.**
+
+**Length** — `{"unit": "Meter"|"Centimeter"|"Millimeter"|"Kilometer"|"Inch"|"Foot"|"Yard"|"Mile"|"Unspecified", "value": <number>}`. Example "30 cm" → `{"unit": "Centimeter", "value": 30}`
+
+**Number** — `{"numberKind": "Integer"|"Decimal"|"Fraction"|"Percent"|"Power"|"Unspecified", "value": <number>}`. Example "1000" → `{"numberKind": "Integer", "value": 1000}`. "3,14" → `{"numberKind": "Decimal", "value": 3.14}`
+
+**NumberRange** — `{"rangeKind": "Number"|"Age"|"Area"|"Currency"|"Length"|"Speed"|"Temperature"|"Volume"|"Weight"|"Information", "minimum": <number>, "maximum": <number>}`. Example "20-30 minut" → `{"rangeKind": "Number", "minimum": 20, "maximum": 30}`
+
+**Ordinal** — `{"offset": <int>, "relativeTo": "Current"|"Start"|"End", "value": "<text>"}`. Example "pierwszy" → `{"offset": 1, "relativeTo": "Start", "value": "first"}`. "ostatni" → `{"offset": 1, "relativeTo": "End", "value": "last"}`
+
+**Percentage** — `{"unit": "Percent", "value": <number>}`. Example "12%" → `{"unit": "Percent", "value": 12}`. "70 procent" → `{"unit": "Percent", "value": 70}`
+
+**SetTemporal** — `{"timex": "<ISO 8601 pattern>", "value": "not resolved"}`. Example "co poniedziałek o 18" → `{"timex": "XXXX-WXX-1T18", "value": "not resolved"}`
+
+**Speed** — `{"unit": "KilometersPerHour"|"MetersPerSecond"|"MilesPerHour"|"Knots"|"Unspecified", "value": <number>}`. Example "100 km/h" → `{"unit": "KilometersPerHour", "value": 100}`
+
+**Temperature** — `{"unit": "Celsius"|"Fahrenheit"|"Kelvin"|"Rankine"|"Unspecified", "value": <number>}`. Example "180°C" → `{"unit": "Celsius", "value": 180}`. "37 stopni" → `{"unit": "Celsius", "value": 37}` (assume Celsius for Polish/EU context)
+
+**Time** — `{"timex": "Thh:mm:ss", "value": "hh:mm:ss"}`. Example "14:30" → `{"timex": "T14:30:00", "value": "14:30:00"}`
+
+**Volume** — `{"unit": "Milliliter"|"Liter"|"CubicMeter"|"Cup"|"Tablespoon"|"Teaspoon"|"Pint"|"Quart"|"Gallon"|"Unspecified", "value": <number>}`. Example "200 ml" → `{"unit": "Milliliter", "value": 200}`. "1 litr" → `{"unit": "Liter", "value": 1}`. "1 filiżanka" → `{"unit": "Cup", "value": 1}`. "łyżka", "łyżeczka" → `{"unit": "Tablespoon"/"Teaspoon", "value": 1}`
+
+**Weight** — `{"unit": "Gram"|"Kilogram"|"Milligram"|"MetricTon"|"Pound"|"Ounce"|"Stone"|"Unspecified", "value": <number>}`. Example "500 g" → `{"unit": "Gram", "value": 500}`. "2 kg" → `{"unit": "Kilogram", "value": 2}`
+
+### Metadata rules
+- For ranges like "20-30 minut" use NumberRange with rangeKind, NOT two separate Number entities
+- Convert text forms to numbers: "trzydzieści" → 30, "dwadzieścia pięć" → 25, "ósmy" → 8 (offset)
+- Keep `unit` strings exact as listed above (case-sensitive)
+- For currency, always include ISO4217 if known (PLN, USD, EUR, GBP, JPY, CHF, etc.)
+- For ambiguous dates without year, FILL `timex` with `XXXX` patterns and OMIT `value`. Do NOT fabricate years that aren't in the article — e.g. "maj" → `{timex: "XXXX-05"}` (no value). Only fill `value` when article actually states the year.
+- Omit metadata entirely for types not in the list (Person, Organization, Product, Skill etc.)
+
+### CRITICAL: ONLY use metadata fields listed for that specific type
+
+Each type has its OWN metadata schema. Do NOT mix fields from different schemas.
+
+- **Number**: ONLY `{numberKind, value}`. NO `offset`, NO `relativeTo`, NO `minimum/maximum`.
+- **NumberRange**: ONLY `{rangeKind, minimum, maximum}`. NO `value`, NO `numberKind`.
+- **Ordinal**: ONLY `{offset, relativeTo, value}` — `value` is the ordinal text ("first").
+- **Date**: ONLY `{timex, value}`. NO `unit`, NO `offset`, NO `maximum`, NO `numberKind`.
+- **DateTime**: ONLY `{timex, value}`. Same as Date.
+- **Time**: ONLY `{timex, value}`.
+- **DateRange**: ONLY `{timex, value}` OR `{rangeKind: "Number", minimum: <year>, maximum: <year>}` for year ranges. NOT both.
+- **TimeRange / DateTimeRange**: ONLY `{timex, value}`.
+- **SetTemporal**: ONLY `{timex, value: "not resolved"}`. NO offset/relativeTo.
+- **Temporal**: **OMIT METADATA ENTIRELY** — Temporal has no Azure metadata schema. Just `{name, type: "Temporal", category: ...}` (no metadata field).
+- **Currency**: ONLY `{unit, value, ISO4217}`.
+- **Percentage / Age / Length / Height / Volume / Weight / Speed / Temperature / Area**: ONLY `{unit, value}`. NO ISO4217, NO timex, NO offset.
+- **Information** (data size like KB/MB only): ONLY `{unit, value}`. For NON-data-size Information (diseases, anatomy, laws, concepts) → OMIT METADATA.
+
+If you cannot resolve a quantity to a number — OMIT the entity entirely or use the parent type without metadata. Never fill `value: null` or `unit: "Unspecified"` when you can simply skip metadata.
+
+### What NOT to extract
 
 To keep entities meaningful, do NOT extract:
 - Adjectives parsed as numbers ("2-składnikowe", "5-dniowy") — these are word forms, not standalone Number entities. Skip them.
-- Generic words "jesień", "wiosna", "lato", "zima" without specific year context — skip OR Temporal if relevant.
-- Generic "rano", "wieczór", "noc" without specific time — skip.
+- Generic words "jesień", "wiosna", "lato", "zima" without specific year context → if relevant to article context, use Temporal but **omit metadata**. Otherwise skip.
+- Generic "rano", "wieczór", "noc" without specific time → skip OR Temporal without metadata.
+- Caloric content ("200 kcal") — calories are NOT data size; treat as `Number` with `{numberKind: "Integer", value: 200}` OR skip.
 - "URL" as a placeholder word (not actual web address) — skip.
 - Unit words alone ("filiżanka", "łyżka") without numeric prefix — skip.
 
@@ -249,8 +321,26 @@ To keep entities meaningful, do NOT extract:
 ❌ Wrong: "bitcoin" → Currency
 ✅ Correct: "bitcoin" → Product (cryptocurrency = financial product, not state-issued currency)
 
+❌ Wrong: "FSC (Forest Stewardship Council)" → Organization unspecified — confirmed
+✅ Correct: → Organization (NGO / certifying body)
+
 ❌ Wrong: "Polak" → Information
 ✅ Correct: "Polak" → PersonType (nationality / group)
+
+❌ Wrong: "jesień" → Temporal with metadata `{timex: "XXXX-autumn-XXXX", offset: 0, relativeTo: "Current"}`
+✅ Correct: "jesień" → Temporal **without metadata** (Temporal has no Azure metadata schema). Or skip if not contextually important.
+
+❌ Wrong: "2-składnikowe" → Number with metadata `{numberKind: "Integer", offset: 0, relativeTo: "Start"}`
+✅ Correct: SKIP this entity entirely (it's an adjective form, not a standalone number)
+
+❌ Wrong: "maj" → Date with metadata `{timex: "XXXX-05-XX", maximum: 5, offset: 0, relativeTo: "Current"}` (extra fields not in Date schema)
+✅ Correct: "maj" → Date with metadata `{timex: "XXXX-05"}` only (omit `value` when year/day are unknown — don't fabricate "2026-05" if article doesn't say so). Or skip the entity if context doesn't make it meaningful.
+
+❌ Wrong: "1 filiżanka" → Volume with metadata `{unit: "Unspecified", value: 1}`
+✅ Correct: "1 filiżanka" → Volume with metadata `{unit: "Cup", value: 1}` (use exact Cup unit)
+
+❌ Wrong: "200 kcal" → Information with metadata `{unit: "Unspecified", value: 200}`
+✅ Correct: "200 kcal" → Number with metadata `{numberKind: "Integer", value: 200}` (calories are NOT data size; Information data-size is for KB/MB/GB only)
 
 ❌ Wrong: "domowa siłownia" → Product
 ✅ Correct: "domowa siłownia" → Structural (a built/arranged space, like a home gym room)
@@ -258,17 +348,19 @@ To keep entities meaningful, do NOT extract:
 ❌ Wrong: extract every word "URL" as URL type
 ✅ Correct: only extract actual web addresses like "https://example.com" as URL
 
+❌ Wrong: any quantity entity with `unit: "Unspecified"` when better unit exists
+✅ Correct: pick most specific unit OR omit metadata entirely if unsure
+
 ## RULES
 - Extract semantically important entities; quality over quantity
 - Entity name in nominative singular (lemma) when possible
 - Preserve original language of entity names (Polish article → Polish names)
 - Detect article language via ISO 639-1
 - Use exact case as in the type list (`Person`, not `person`)
-- Each entity is `{name, type}` only — no metadata, no category, no strength
 
 ## EXAMPLES
 
-### Example 1: Polish cooking article
+### Example 1: Polish cooking article (with metadata for quantities)
 Input: "Klasyczny rosół na niedzielę. Potrzebujesz 500 g kurczaka, 2 marchewki, pietruszki, selera i lubczyku. Gotuj 2 godziny w 90°C..."
 Output:
 {
@@ -281,9 +373,9 @@ Output:
     {"name": "pietruszka", "type": "Product"},
     {"name": "seler", "type": "Product"},
     {"name": "lubczyk", "type": "Product"},
-    {"name": "500 g", "type": "Weight"},
-    {"name": "2 godziny", "type": "Duration"},
-    {"name": "90°C", "type": "Temperature"}
+    {"name": "500 g", "type": "Weight", "metadata": {"unit": "Gram", "value": 500}},
+    {"name": "2 godziny", "type": "Duration", "metadata": {"unit": "Hour", "value": 2}},
+    {"name": "90°C", "type": "Temperature", "metadata": {"unit": "Celsius", "value": 90}}
   ]
 }
 
@@ -315,5 +407,37 @@ Output:
     {"name": "lekarz", "type": "PersonType"},
     {"name": "70%", "type": "Percentage"},
     {"name": "Polak", "type": "PersonType"}
+  ]
+}
+
+### Example 4: German finance article (with metadata for date / percentage / currency)
+Input: "Die Europäische Zentralbank hat die Zinsen am 5. Mai 2025 um 0,25% auf 4,75% erhöht. Die Mindesteinlage beträgt 1000 Euro. Bitcoin reagierte mit einem Kursrückgang von 5%..."
+Output:
+{
+  "category": "Finance, Banking and Insurance",
+  "language": "de",
+  "entities": [
+    {"name": "Europäische Zentralbank", "type": "Organization"},
+    {"name": "5. Mai 2025", "type": "Date", "metadata": {"timex": "2025-05-05", "value": "2025-05-05"}},
+    {"name": "0,25%", "type": "Percentage", "metadata": {"unit": "Percent", "value": 0.25}},
+    {"name": "4,75%", "type": "Percentage", "metadata": {"unit": "Percent", "value": 4.75}},
+    {"name": "1000 Euro", "type": "Currency", "metadata": {"unit": "Euro", "value": 1000, "ISO4217": "EUR"}},
+    {"name": "bitcoin", "type": "Product"},
+    {"name": "5%", "type": "Percentage", "metadata": {"unit": "Percent", "value": 5}}
+  ]
+}
+
+### Example 5: Polish sports article
+Input: "Joga to nie tylko ćwiczenia. Medytacja jest częścią praktyki. EURO 2024 odbędzie się latem 2024 w Niemczech..."
+Output:
+{
+  "category": "Sport, Fitness, Bodybuilding",
+  "language": "pl",
+  "entities": [
+    {"name": "joga", "type": "Skill"},
+    {"name": "medytacja", "type": "Skill"},
+    {"name": "EURO 2024", "type": "SportsEvent"},
+    {"name": "lato 2024", "type": "DateRange"},
+    {"name": "Niemcy", "type": "CountryRegion"}
   ]
 }

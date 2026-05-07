@@ -40,8 +40,8 @@ SAMPLING_STEP2 = {
 # Backward compat — wcześniejszy kod używał SAMPLING_DEFAULT
 SAMPLING_DEFAULT = SAMPLING_STEP1
 
-MAX_TOKENS_STEP1 = 2000   # 15 encji × ~15-25 tokenów (PL nazwy + type) + category + language ≈ 400-600; +bufor.
-MAX_TOKENS_STEP2 = 2000   # title 70 + meta 160 + h1 100 + summary 400 znaków ≈ ~250-350 tokenów (PL); +bufor.
+MAX_TOKENS_STEP1 = 4000   # v6: bez metadata, ale długie artykuły potrafią mieć 50+ encji × ~10-15 tok = 500-750; bufor 4000 dla outlierów (input 18k + output 4k = 22k < 24576 max-model-len).
+MAX_TOKENS_STEP2 = 600    # title+meta+h1+summary realnie ~250-350 tok; 600 = ~2× safety. Hit = patologiczny loop → fail-fast → retry-with-feedback.
 
 # Twardy sufit output tokenów (safety) — dla edge case'ów gdzie model próbowałby
 # wygenerować dużo tekstu (np. junkey, niespójny artykuł). Per faktyczny request

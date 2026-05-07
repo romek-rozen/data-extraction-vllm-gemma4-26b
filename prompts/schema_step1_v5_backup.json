@@ -45,6 +45,22 @@
               "SportsEvent", "State", "Structural", "Temperature", "Temporal",
               "Time", "TimeRange", "URL", "Volume", "Weight"
             ]
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Optional structured resolution. Fill ONLY for: Age, Area, Currency, Date, DateTime, Duration, Information (data size), Length, Number, NumberRange, Ordinal, Percentage, SetTemporal, Speed, Temperature, Time, Volume, Weight. Omit for other types.",
+            "properties": {
+              "unit": {"type": "string"},
+              "value": {"type": ["number", "string"]},
+              "ISO4217": {"type": "string"},
+              "timex": {"type": "string"},
+              "numberKind": {"type": "string"},
+              "rangeKind": {"type": "string"},
+              "minimum": {"type": "number"},
+              "maximum": {"type": "number"},
+              "offset": {"type": "number"},
+              "relativeTo": {"type": "string"}
+            }
           }
         },
         "required": ["name", "type"]
