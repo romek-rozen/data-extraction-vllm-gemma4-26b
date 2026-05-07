@@ -56,7 +56,8 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Dlaczego:** dwa zadania o fundamentalnie różnym charakterze — Step 1 deterministyczna ekstrakcja, Step 2 kreatywna generacja. Każdy może mieć osobny optymalny config (Phase 3).
 - **Wartość pipe note:** uniwersalna warstwa encji wielokrotnego użytku (knowledge graph, search, multilingual expansion).
 - **Walidacja (Phase 2):** smoke 3 URL pokazał wysoką jakość outputu (sensowne kategorie, idiomatyczne polskie meta, encje z Step 1 wykorzystane w Step 2). Decyzja: **pomijamy one-step baseline** — koszt implementacji + runa nie uzasadniony. Pełen run two-step na 100 URL jako finalne potwierdzenie skali. Jeśli pojawią się problemy jakościowe w Phase 4, wracamy do baseline.
-- **Status:** final, walidacja przez 100 URL run.
+- **Revisit (Phase 5b, 2026-05-07):** dorzucamy realną ścieżkę one-step (`prompts/step_onestep_system.md`, `prompts/schema_onestep.json`, `lib/pipeline_onestep.py`, `scripts/run_onestep.py`) + harness `scripts/compare_onestep_vs_twostep.py` (oba pipeline'y na tym samym `--random --seed` sample, raport speed+quality, widok dashboard `compare_onestep`). Two-step zostaje produkcyjnym defaultem dopóki one-step nie spełni: speedup wall ≥1.5× ∧ category match ≥90% ∧ Jaccard encji ≥0.5 ∧ fail rate one-step ≤ two-step. Po runie 20→100 URL: liczby + decyzja w osobnym wpisie (D7b).
+- **Status:** final do czasu kontr-dowodu z Phase 5b; walidacja przez 100 URL run two-step zaliczona.
 
 ### D8: Tokenizer lokalny (Rust `tokenizers`) zamiast vLLM `/tokenize`
 - **Co:** `lib/tokenizer.py` używa `tokenizers.Tokenizer.from_file(tokenizer.json)` bezpośrednio z katalogu modelu.
