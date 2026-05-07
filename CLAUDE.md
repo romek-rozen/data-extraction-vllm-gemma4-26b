@@ -13,7 +13,7 @@ Two-step pipeline ekstrakcji metadanych SEO z 21M URL na DGX Spark (dev) → RTX
 
 `INSTRUCTIONS_FROM_CLAUDE.md` to **źródło prawdy**: prompty (full English), JSON Schemas, sampling defaults, decyzje architektoniczne, lista pułapek. Wszystkie zmiany pipeline'u powinny być spójne z tym dokumentem.
 
-`PLAN.md` — plan techniczny per faza. `TODO.md` — actionable checklist.
+`PLAN.md` — plan techniczny per faza. `TODO.md` — actionable checklist. `DECISIONS.md` — log decyzji z uzasadnieniem (co, dlaczego, oparte na czym).
 
 ## Język
 
@@ -46,7 +46,7 @@ websites/<hash>/              ← input
 
 ## Konwencje
 
-- **Markdown w ekstrakcji** — `output_format="markdown"`, `include_links=True`, `include_formatting=True`, `include_comments=False`, `include_tables=False`. Powód: model ekstrahuje encje + SEO meta — nagłówki/linki/bold to bezpośrednie sygnały. Koszt ~+2,3% długości (~75 tokenów/artykuł).
+- **Markdown w ekstrakcji** — `output_format="markdown"`, `include_links=True`, `include_formatting=True`, `include_comments=False`, `include_tables=True`. Powód: model ekstrahuje encje + SEO meta — nagłówki/linki/bold/tabele to bezpośrednie sygnały. Koszt vs plain text ~+2,86% mediana (Phase 1 pomiar).
 - **Two-step jako default** — one-step tylko jako baseline porównawczy w Phase 2.
 - **Sampling: Google defaults** — `temperature=1.0, top_p=0.95, top_k=64, repetition_penalty=1.0` (NIE 1.2 — łamie powtarzające się klucze JSON). Niższe temperatury tylko z empirycznym dowodem (Phase 3 A/B).
 - **Idempotencja** — klucz `url_hash = sha256(url)`; rerun nie duplikuje.

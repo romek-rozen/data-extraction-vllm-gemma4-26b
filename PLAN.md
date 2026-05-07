@@ -17,7 +17,7 @@ Walidacja two-step pipeline (entity extraction + SEO meta) na Gemma 4 26B A4B NV
 
 **Decision:** vLLM stabilnie odpowiada → przechodzimy do Phase 1.
 
-### Phase 1: HTML cleanup pipeline ⏳
+### Phase 1: HTML cleanup pipeline ✅
 **Cel:** zmierzyć skrócenie inputu po markdown ekstrakcji + zdecydować o `include_tables`.
 
 - `lib/data_loader.py`: trafilatura w trybie `output_format="markdown"`, `include_links=True`, `include_formatting=True`, `include_comments=False`, `include_tables=False`.
@@ -102,4 +102,4 @@ Network Volume 100GB, pobrać `nvidia/Gemma-4-26B-A4B-NVFP4`, skopiować kod, sm
 
 ## Status faz
 
-Phase 0 ✅ • Phase 1 ⏳ • Phase 2 ⏳ • Phase 3 ⏳ • Phase 4 ⏳ • Phase 5 ⏳ • Phase 6 ⏳ • Phase 7–9 ⏳
+Phase 0 ✅ • Phase 1 ✅ • Phase 2 ⏳ • Phase 3 ⏳ • Phase 4 ⏳ • Phase 5 ⏳ • Phase 6 ⏳ • Phase 7–9 ⏳

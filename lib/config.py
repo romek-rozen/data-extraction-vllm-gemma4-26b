@@ -8,9 +8,15 @@ WEBSITES_DIR = PROJECT_ROOT / "websites"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 RESULT_DIR = PROJECT_ROOT / "result"
 
-# Truncate ekstrahowanego markdownu (znaki). 80k ≈ ~20k tokenów; bufor pod max-model-len 24576
-# (zostawiamy ~4k na system prompt + output).
+# Twardy limit znaków (safety net przed tokenizacją). 80k ≈ ~20k tokenów —
+# znacznie powyżej max obserwowanego (5979) z Phase 1. Dla outlierów odsiewa
+# patologiczne strony bez kosztu tokenizacji.
 TEXT_TRUNCATE_LIMIT = 80000
+
+# Limit tokenów artykułu — twardy budżet pod max-model-len 24576:
+# 24576 - system prompt (max 2929 Step 1) - user template (37) - output (400) - bufor (1210) ≈ 20000.
+# Z Phase 1: max artykuł = 5979 tokenów. 20000 to ~3,3× headroom dla outlierów.
+MAX_ARTICLE_TOKENS = 20000
 
 # vLLM server (OpenAI-compat)
 VLLM_BASE_URL = "http://localhost:8000/v1"

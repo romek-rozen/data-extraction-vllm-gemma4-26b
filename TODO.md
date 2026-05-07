@@ -10,14 +10,15 @@ Actionable checklist per faza. Plan: `PLAN.md`. Spec: `INSTRUCTIONS_FROM_CLAUDE.
 - [x] Healthcheck: `curl http://localhost:8001/v1/models` → `max_model_len: 24576`
 - [x] Smoke: math (`12*17 → 204`, ~300ms) + JSON mode (`{"language": "pl"}`, 2s, `reasoning: null`)
 
-## Phase 1 — HTML cleanup pipeline
+## Phase 1 — HTML cleanup pipeline ✅
 
-- [ ] `lib/config.py`: `WEBSITES_DIR="websites"`, `RESULT_DIR="result"`, `TEXT_TRUNCATE_LIMIT` (do ustalenia po pomiarze)
-- [x] `lib/data_loader.py`: trafilatura markdown z `include_links=True, include_formatting=True, include_comments=False, include_tables=False`
-- [ ] Smoke: `load_articles('websites', limit=3)` zawiera `# `, `## `, `[anchor](url)`
-- [ ] `scripts/measure_lengths.py` na 100 URL: dystrybucja znaków + tokenów (median, p95, max) BEFORE / AFTER markdown / AFTER plain
-- [ ] A/B `include_tables` True vs False (30 URL): czy tabele dorzucają sygnał?
-- [ ] **Decyzja** w `PLAN.md` + tabela wyników w `result/phase1_lengths.md`
+- [x] `lib/config.py`: `WEBSITES_DIR`, `RESULT_DIR`, `TEXT_TRUNCATE_LIMIT=80000`
+- [x] `lib/data_loader.py`: trafilatura markdown + url/domain/path z json.gz
+- [x] Smoke: `load_articles` zwraca markdown z `## nagłówkami`, `**bold**`
+- [x] `scripts/measure_lengths.py` na 100 URL: tokeny przez vLLM `/tokenize` (dokładny tokenizer Gemma 4)
+- [x] **Decyzja**: cleanup MANDATORY (98,45% redukcja), markdown ON (+2,86% overhead), `include_tables=False` (outlier 109%)
+- [x] Wyniki: `result/phase1_lengths.md` + `result/phase1_lengths.json`
+- [ ] A/B `include_tables` True vs False — opcjonalne, Phase 2 jeśli będą problemy z brakiem kontekstu z tabel
 
 ## Phase 2 — Two-step vs one-step
 
