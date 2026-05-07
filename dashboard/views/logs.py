@@ -41,11 +41,20 @@ def render(filters: dict, data: dict):
         return
 
     run = st.selectbox("Run", runs, index=0)
-    log_path = RESULTS_BASE / run / "pipeline.log"
+    run_dir = RESULTS_BASE / run
 
-    if not log_path.exists():
-        st.warning(f"Brak `pipeline.log` w `{log_path}`.")
+    log_files = sorted(run_dir.glob("*.log"))
+    if not log_files:
+        st.warning(
+            f"Brak plików `*.log` w `{run_dir}`.\n\n"
+            "Spodziewane: `pipeline.log` (run_full), `onestep.log` / `twostep.log` (compare_onestep_vs_twostep)."
+        )
         return
+
+    log_names = [p.name for p in log_files]
+    default_idx = log_names.index("pipeline.log") if "pipeline.log" in log_names else 0
+    sel_log = st.radio("Log file", log_names, index=default_idx, horizontal=True)
+    log_path = run_dir / sel_log
 
     size_kb = log_path.stat().st_size / 1024
     mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(log_path.stat().st_mtime))
@@ -85,7 +94,7 @@ def render(filters: dict, data: dict):
     st.download_button(
         "Pobierz cały log",
         data=log_path.read_bytes(),
-        file_name=f"{run}_pipeline.log",
+        file_name=f"{run}_{sel_log}",
         mime="text/plain",
     )
 
