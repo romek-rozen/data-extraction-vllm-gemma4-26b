@@ -65,7 +65,10 @@ python -u scripts/run_full.py --out-dir final_results/<run-name> --limit 0 --con
         )
         return
 
-    filters = render_filters(data["step1"], data["step2"], data["runs"])
+    filters = render_filters(
+        data["step1"], data["step2"], data["runs"],
+        onestep=data.get("onestep"),
+    )
 
     module = PAGES[selected_key][1]
     module.render(filters, data)

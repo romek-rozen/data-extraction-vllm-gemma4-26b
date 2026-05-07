@@ -75,6 +75,29 @@ def _normalize_step2(rows: list[dict], run: str) -> pd.DataFrame:
     return df
 
 
+def _normalize_onestep(rows: list[dict], run: str) -> pd.DataFrame:
+    """One-step łączy pola Step1 (entities/category/language) + Step2 (SEO meta)."""
+    if not rows:
+        return pd.DataFrame()
+    df = pd.json_normalize(rows, max_level=1)
+    df["run"] = run
+    df["entities_count"] = [len(r.get("entities") or []) for r in rows]
+    df["entities"] = [r.get("entities") or [] for r in rows]
+    for col, default in [
+        ("title", ""),
+        ("meta_description", ""),
+        ("h1", ""),
+        ("article_summary", ""),
+    ]:
+        if col not in df.columns:
+            df[col] = default
+        df[col] = df[col].fillna("")
+        df[f"{col}_len"] = df[col].astype(str).str.len()
+    df["prompt_tokens"] = df.get("usage.prompt_tokens", 0)
+    df["completion_tokens"] = df.get("usage.completion_tokens", 0)
+    return df
+
+
 @st.cache_data(ttl=10, show_spinner=False)
 def load_results() -> dict:
     """Skanuje RESULTS_BASE i zwraca zunifikowane dane."""
@@ -82,6 +105,7 @@ def load_results() -> dict:
         return {
             "step1": pd.DataFrame(),
             "step2": pd.DataFrame(),
+            "onestep": pd.DataFrame(),
             "runs": [],
             "summaries": {},
             "metrics": {},
@@ -89,6 +113,7 @@ def load_results() -> dict:
 
     step1_frames: list[pd.DataFrame] = []
     step2_frames: list[pd.DataFrame] = []
+    onestep_frames: list[pd.DataFrame] = []
     runs: list[str] = []
     summaries: dict[str, str] = {}
     metrics: dict[str, dict[str, str]] = {}
@@ -99,7 +124,8 @@ def load_results() -> dict:
 
         s1 = _read_jsonl(run_dir / "entity_layer.jsonl")
         s2 = _read_jsonl(run_dir / "final.jsonl")
-        if not s1 and not s2:
+        os1 = _read_jsonl(run_dir / "onestep.jsonl")
+        if not s1 and not s2 and not os1:
             continue
 
         runs.append(run_dir.name)
@@ -107,6 +133,8 @@ def load_results() -> dict:
             step1_frames.append(_normalize_step1(s1, run_dir.name))
         if s2:
             step2_frames.append(_normalize_step2(s2, run_dir.name))
+        if os1:
+            onestep_frames.append(_normalize_onestep(os1, run_dir.name))
 
         summary_path = run_dir / "summary.md"
         if summary_path.exists():
@@ -120,10 +148,12 @@ def load_results() -> dict:
 
     step1 = pd.concat(step1_frames, ignore_index=True) if step1_frames else pd.DataFrame()
     step2 = pd.concat(step2_frames, ignore_index=True) if step2_frames else pd.DataFrame()
+    onestep = pd.concat(onestep_frames, ignore_index=True) if onestep_frames else pd.DataFrame()
 
     return {
         "step1": step1,
         "step2": step2,
+        "onestep": onestep,
         "runs": runs,
         "summaries": summaries,
         "metrics": metrics,
