@@ -15,6 +15,8 @@ Two-step pipeline ekstrakcji metadanych SEO z 21M URL na DGX Spark (dev) → RTX
 
 `PLAN.md` — plan techniczny per faza. `TODO.md` — actionable checklist. `DECISIONS.md` — log decyzji z uzasadnieniem (co, dlaczego, oparte na czym).
 
+**Reguła:** każda nietrywialna decyzja techniczna (zmiana parametru samplingu, flagi vLLM, schematu JSON, biblioteki, layoutu) → wpis w `DECISIONS.md` zgodnie z formatem na końcu tego pliku. Bez wpisu decyzja nie istnieje — kolejne osoby (i sesje Claude) nie znają kontekstu, dlaczego coś jest właśnie tak.
+
 ## Język
 
 Komunikacja z użytkownikiem: **polski**. Prompty do modelu: **English** (~30% mniej tokenów; uniwersalność dla 140+ języków artykułów).
@@ -92,6 +94,6 @@ Wymaga: Python 3.11+, dostęp do GPU (Spark GB10 sm_121 lub RTX 5090 sm_120).
 
 - `repeat_penalty=1.2` łamie JSON (powtarzające się klucze) → trzymaj 1.0.
 - `description` w JSON Schema nie trafia do modelu (xgrammar) → opisy enum w system prompt.
-- Markdown z `include_tables=True` zwiększa koszt znacząco; default OFF, decyzja po Phase 1 A/B.
+- Markdown z `include_tables=True` (decyzja Phase 1, D5 w DECISIONS.md) — koszt p95 +2,5%, zysk: tabele to sygnał porównań/specyfikacji.
 - Surowy HTML w prompcie zżera tokeny i pogarsza jakość → zawsze trafilatura.
 - Niska temperatura bez dowodu = degradacja Gemma 4 (kalibracja Google na 1.0).

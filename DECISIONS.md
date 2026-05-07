@@ -74,6 +74,12 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Dlaczego nie `headers[]` z JSON:** czasem strony mają błędnie porobione headingi w HTML — black box, nie ufamy.
 - **Konsekwencja:** model wszystko ekstrahuje sam z markdownu. Model jest groundtruth, nie metadata strony.
 
+### D11: Flat layout (`lib/` + `scripts/`) zamiast `src/`
+- **Co:** Moduły importowalne w `lib/`, runnable entry points w `scripts/`. Brak `pyproject.toml`, brak `pip install -e .`.
+- **Dlaczego:** `src/` layout to standard dla **bibliotek dystrybuowanych przez PyPI** — wymusza pakowanie i niesie boilerplate. Nasz projekt to research pipeline odpalany lokalnie, nie biblioteka. Flat jest spójny z siostrzanym projektem `mateusz-g-json-vs-flat/`.
+- **Alternatywy odrzucone:** `src/<package>/` z `pyproject.toml` — niepotrzebny narzut bez zysku (testy, izolacja, dystrybucja PyPI nie są w scope).
+- **Status:** final. Jeśli kiedyś dystrybuujemy jako pakiet, wtedy migracja.
+
 ---
 
 ## Format dla nowych decyzji
