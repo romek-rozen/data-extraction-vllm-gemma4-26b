@@ -1,0 +1,150 @@
+# Two-step vLLM pipeline — ekstrakcja meta SEO + encji
+
+Eksperyment two-step na DGX Spark: ekstrakcja encji + generacja SEO meta z artykułów HTML, model **Gemma 4 26B A4B NVFP4** + vLLM + `guided_json` (xgrammar).
+
+Spec: [`INSTRUCTIONS_FROM_CLAUDE.md`](INSTRUCTIONS_FROM_CLAUDE.md). Plan: [`PLAN.md`](PLAN.md). Zadania: [`TODO.md`](TODO.md). Wskazówki dla Claude Code: [`CLAUDE.md`](CLAUDE.md).
+
+## Pobranie modelu
+
+Wybrany model finalny (prod, RTX 5090): **`nvidia/Gemma-4-26B-A4B-NVFP4`** ([HF](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4)).
+
+Na DGX Spark (sm_121, brak natywnego FP4) działa również wariant testowany przez społeczność: `bg-digitalservices/Gemma-4-26B-A4B-it-NVFP4`. Możesz pobrać oba — różnica to ~30 GB, oba są w tej samej rodzinie NVFP4.
+
+### 1. Login do Hugging Face
+
+Gemma jest gated — trzeba zaakceptować licencję w przeglądarce na stronie modelu, potem zalogować CLI:
+
+```bash
+# Zaakceptuj licencję na: https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4
+# Wygeneruj token: https://huggingface.co/settings/tokens (scope: "Read")
+
+pip install -U "huggingface_hub[cli]"
+hf auth login
+# wklej token (możesz też przekazać przez env: HF_TOKEN=hf_xxx hf auth login)
+
+# weryfikacja
+hf auth whoami
+```
+
+### 2. Pobieranie
+
+**Wariant A — finalny (`nvidia/...`), zalecany:**
+
+```bash
+mkdir -p ~/models/gemma4-26b-nvfp4
+hf download nvidia/Gemma-4-26B-A4B-NVFP4 \
+  --local-dir ~/models/gemma4-26b-nvfp4
+```
+
+**Wariant B — quant testowany na Sparku (jeśli wariant A miałby problemy):**
+
+```bash
+mkdir -p ~/models/gemma4-26b-nvfp4-bg
+hf download bg-digitalservices/Gemma-4-26B-A4B-it-NVFP4 \
+  --local-dir ~/models/gemma4-26b-nvfp4-bg
+```
+
+> Domyślnie `hf download` zapisuje do cache (`~/.cache/huggingface/hub/`) i tworzy symlinki w `--local-dir`. Jeśli chcesz twarde kopie (bez cache), dodaj `HF_HUB_DOWNLOAD_TIMEOUT=300 HF_HUB_ENABLE_HF_TRANSFER=1` przed komendą — `hf_transfer` znacząco przyspiesza pobieranie. Instalacja: `pip install hf_transfer`.
+
+Rozmiar: ~16,5 GB plików modelu + ~14 GB dodatków (tokenizer, config). Czas pobierania zależy od łącza — Spark ma szybki link, więc zwykle 10–20 min.
+
+### 3. Weryfikacja
+
+```bash
+ls -lh ~/models/gemma4-26b-nvfp4/
+# powinieneś zobaczyć:
+#   config.json
+#   tokenizer.json, tokenizer.model, tokenizer_config.json
+#   model-00001-of-XX.safetensors ... (kilkanaście shardów)
+#   model.safetensors.index.json
+```
+
+Sprawdź sumaryczny rozmiar (`du -sh ~/models/gemma4-26b-nvfp4/`) — powinien być ~16–20 GB.
+
+### 4. (opcjonalnie) Patch dla sm_121
+
+Jeśli używasz oficjalnego image vLLM `vllm/vllm-openai:gemma4-cu130` na Sparku i napotkasz błąd związany z `gemma4` model loader, w katalogu modelu może być potrzebny patch `gemma4_patched.py` (mountowany do `/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/gemma4.py`). Patch publikowany jest przez społeczność razem z quantami `bg-digitalservices`. Sprawdź `INSTRUCTIONS_FROM_CLAUDE.md` sekcja "Phase 0".
+
+## Phase 0 — uruchomienie vLLM na DGX Spark
+
+Bazuje na [oficjalnym przewodniku NVIDIA dla DGX Spark](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/vllm). Dla rodziny **Gemma 4** używamy custom image `vllm/vllm-openai:gemma4-cu130` (Marlin fallback dla sm_121).
+
+### 1. Docker permissions (raz na zawsze)
+
+```bash
+docker ps   # jeśli "permission denied":
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### 2. Pull obrazu
+
+```bash
+docker pull vllm/vllm-openai:gemma4-cu130
+```
+
+### 3. Start serwera
+
+Mamy gotowy skrypt — port **8001** (8000 zajęty na Sparku przez `open-terminal`), mountuje patch `gemma4_patched.py` (sm_121 fix), używa lokalnej ścieżki modelu (bez potrzeby HF_TOKEN w kontenerze):
+
+```bash
+bash scripts/start_vllm.sh
+
+# logi (czekaj na "Application startup complete", ~1-3 min):
+docker logs -f vllm-gemma4
+```
+
+Override przez env: `MODEL_DIR=...`, `HOST_PORT=...`, `CONTAINER_NAME=...`.
+
+### 4. Smoke test
+
+```bash
+bash scripts/smoke_test.sh
+```
+
+Sprawdza `/v1/models`, prosty math test (`12*17 = 204`), oraz JSON output mode (sanity dla Step 1).
+
+### 5. Stop
+
+```bash
+docker rm -f vllm-gemma4
+```
+
+## Struktura projektu
+
+```
+INSTRUCTIONS_FROM_CLAUDE.md   ← pełna spec (źródło prawdy)
+CLAUDE.md, PLAN.md, TODO.md, README.md
+lib/
+  data_loader.py              ← trafilatura markdown + url_hash
+  config.py                   ← ścieżki, sampling, vLLM URL
+prompts/
+  step1_system.md, step2_system.md
+  schema_step1.json, schema_step2.json
+websites/<sha-hash>/
+  html.gz, json.gz            ← input (1 katalog = 1 URL)
+result/                        ← output: entity_layer.jsonl, final.jsonl
+```
+
+## Zależności
+
+```bash
+pip install -r requirements.txt
+```
+
+## Smoke test loadera
+
+Po `pip install -r requirements.txt` możesz zweryfikować ekstrakcję markdown:
+
+```bash
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from lib.data_loader import load_articles
+arts = load_articles('websites', limit=3)
+for a in arts:
+    print(a['id'], a['url_hash'][:12], a['text_len'])
+    print(a['text'][:300]); print('---')
+"
+```
+
+Powinieneś zobaczyć markdown z `## nagłówkami`, `**bold**` i ewentualnie `[anchor](url)`.

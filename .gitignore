@@ -1,0 +1,32 @@
+# Dane wejściowe (lokalne, nie commitować)
+websites/
+
+# Wyniki eksperymentów (lokalne)
+result/
+benchmark_results/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Środowisko
+.env
+.env.local
+
+# Modele (zawsze poza repo)
+models/
+*.safetensors
+*.gguf
+
+# Edytory
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logi
+*.log

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {"type": "string", "maxLength": 70},
+    "meta_description": {"type": "string", "maxLength": 160},
+    "h1": {"type": "string", "maxLength": 100},
+    "article_summary": {"type": "string", "maxLength": 400}
+  },
+  "required": ["title", "meta_description", "h1", "article_summary"]
+}

@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "Automotive", "Beauty", "Business", "Computer games", "Construction",
+        "Cooking", "Culture, Art", "Diet, Weight loss", "Ecology",
+        "Economy, Industry", "Education, Science", "Entertainment",
+        "Family, Child, Pregnancy", "Fashion", "Finance, Banking and Insurance",
+        "Gastronomy", "Gossip, Celebrity Life, Lifestyle", "Health, Medicine",
+        "History", "House, Garden, Interiors",
+        "Household appliances and consumer electronics",
+        "IT, New technologies, Computers", "Law", "Marketing, Advertising, Media",
+        "Music", "News", "Other themes", "Photography and video-filming",
+        "Politics", "Power engineering", "Psychology, Personal development",
+        "Purchases, Opinions", "Real estate", "Religion", "Sex and eroticism",
+        "Sport, Fitness, Bodybuilding", "Tourism, Travel",
+        "Transport & Logistics", "Wedding", "Work",
+        "Zoology, agriculture and forestry", "junkey"
+      ]
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}$"
+    },
+    "entities": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "maxLength": 100},
+          "type": {
+            "type": "string",
+            "enum": [
+              "person", "organization", "location", "brand", "product",
+              "technology", "event", "work", "date", "money",
+              "asset", "law", "nationality", "structure", "substance",
+              "disease", "therapy", "species", "dish", "ingredient",
+              "discipline", "activity", "other"
+            ]
+          }
+        },
+        "required": ["name", "type"]
+      }
+    }
+  },
+  "required": ["category", "language", "entities"]
+}

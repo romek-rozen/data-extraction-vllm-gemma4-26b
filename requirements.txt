@@ -1,0 +1,5 @@
+vllm
+trafilatura
+xgrammar
+requests
+tiktoken
