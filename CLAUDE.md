@@ -4,10 +4,24 @@ Wskazówki dla Claude Code do pracy w tym repo.
 
 ## Projekt
 
-Two-step pipeline ekstrakcji metadanych SEO z 21M URL na DGX Spark (dev) → RTX 5090 (prod). Model: **`nvidia/Gemma-4-26B-A4B-NVFP4`**. Stack: vLLM + `guided_json` (xgrammar) + trafilatura (markdown).
+Two-step pipeline ekstrakcji metadanych SEO z 21M URL na DGX Spark (dev) → RTX 5090 (prod). Model: **`nvidia/Gemma-4-26B-A4B-NVFP4`**. Stack: vLLM + xgrammar (`response_format: json_schema`) + trafilatura (markdown).
 
-- **Step 1** — uniwersalna ekstrakcja encji + wykrycie języka + kategoria (output → pipe note).
+- **Step 1** — ekstrakcja encji + wykrycie języka + kategoria (output → pipe note). Schema: Microsoft Azure NER (51 typów + 11 kategorii high-level + strong/weak + metadata).
 - **Step 2** — generacja meta SEO (title, meta_description, h1, article_summary) w języku artykułu.
+
+## Schema encji (Azure NER)
+
+```json
+{
+  "name": "190°C",
+  "type": "Temperature",      // 1 of 51 Azure types
+  "category": "Quantity",      // high-level group (deterministic from type)
+  "strength": "weak",          // strong (Wikidata-linkable) / weak (kontekstowo-zależna)
+  "metadata": {"unit": "Celsius", "value": 190}  // optional, for 18 Quantity/DateTime types
+}
+```
+
+`category` i `strength` mapowane deterministycznie po typie w `lib/pipeline.py:TYPE_TO_CATEGORY`. `metadata` cleanup (whitelist per typ) w `_clean_metadata()`.
 
 ## Spec — czytaj zawsze przed implementacją
 
@@ -59,24 +73,29 @@ websites/<hash>/              ← input
 ## Polecenia dev
 
 ```bash
-# vLLM (Spark, NVFP4 + Marlin fallback)
-docker run -d --gpus all --ipc=host \
-  -v ~/models/gemma4-26b-nvfp4:/model \
-  -p 8000:8000 vllm/vllm-openai:gemma4-cu130 \
-  --model /model --quantization modelopt --kv-cache-dtype fp8 \
-  --max-model-len 16384 --gpu-memory-utilization 0.85 \
-  --moe-backend marlin --enable-prefix-caching
+# vLLM startup (gotowy skrypt z patchem sm_121, port 8001, thinking OFF)
+bash scripts/start_vllm.sh
+docker logs -f vllm-gemma4   # czekaj na "Application startup complete"
+bash scripts/smoke_test.sh    # math + JSON mode sanity
 
 # Smoke test loadera
-python -c "from lib.data_loader import load_articles; \
+python3 -c "from lib.data_loader import load_articles; \
   arts = load_articles('websites', limit=3); \
   print(arts[0]['text'][:500])"
 
-# Step 1 (po zaimplementowaniu)
-python -u scripts/run_step1.py --limit 100
+# Pełen E2E (mkdir + snapshot + Step 1 + Step 2 + analiza)
+python3 -u scripts/run_full.py --out-dir final_result --limit 0 --concurrency 8
 
-# Pełen pipeline
-python -u scripts/run_pipeline.py --limit 500
+# Pojedyncze fazy
+python3 -u scripts/run_step1.py --limit 100 --concurrency 8
+python3 -u scripts/run_step2.py --limit 100 --concurrency 8
+
+# A/B sampling
+python3 scripts/ab_sampling.py --step 1 --limit 100 --concurrency 8
+
+# Analiza wyników
+python3 scripts/analyze_phase2.py --samples 10
+python3 scripts/analyze_entity_quality.py --top 30
 ```
 
 Brak formalnych testów — weryfikacja przez eyeball outputów + sanity check schematów.

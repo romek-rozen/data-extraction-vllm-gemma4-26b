@@ -1,8 +1,21 @@
 # Two-step vLLM pipeline — ekstrakcja meta SEO + encji
 
-Eksperyment two-step na DGX Spark: ekstrakcja encji + generacja SEO meta z artykułów HTML, model **Gemma 4 26B A4B NVFP4** + vLLM + `guided_json` (xgrammar).
+Pipeline ekstrakcji metadanych z artykułów HTML, model **Gemma 4 26B A4B NVFP4** + vLLM + xgrammar (`response_format: json_schema`). Cel: 21M URL na różnych domenach.
 
-Spec: [`INSTRUCTIONS_FROM_CLAUDE.md`](INSTRUCTIONS_FROM_CLAUDE.md). Plan: [`PLAN.md`](PLAN.md). Zadania: [`TODO.md`](TODO.md). Wskazówki dla Claude Code: [`CLAUDE.md`](CLAUDE.md).
+**Status:** Phase 0–4 ✅ ukończone. Phase 5 (E2E na 155 URL) gotowe do uruchomienia.
+
+**Schema encji:** Microsoft Azure NER (51 typów + 11 kategorii high-level + strong/weak strength + structured metadata dla Quantity/DateTime).
+
+## Dokumentacja
+
+- [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/) — pełne podsumowanie sesji (do artykułu)
+- [`docs/architecture.md`](docs/architecture.md) — architektura pipeline'u + diagram + storage
+- [`docs/storage_21m_urls.md`](docs/storage_21m_urls.md) — analiza opcji storage (SQLite, PostgreSQL, Parquet+DuckDB+Qdrant)
+- [`INSTRUCTIONS_FROM_CLAUDE.md`](INSTRUCTIONS_FROM_CLAUDE.md) — pełna spec architektury (źródło prawdy dla decyzji)
+- [`PLAN.md`](PLAN.md) — plan techniczny per faza (status all phases)
+- [`TODO.md`](TODO.md) — actionable checklist
+- [`DECISIONS.md`](DECISIONS.md) — log 15 decyzji technicznych z uzasadnieniem
+- [`CLAUDE.md`](CLAUDE.md) — wskazówki dla Claude Code
 
 ## Pobranie modelu
 
@@ -109,6 +122,37 @@ Sprawdza `/v1/models`, prosty math test (`12*17 = 204`), oraz JSON output mode (
 ```bash
 docker rm -f vllm-gemma4
 ```
+
+## Pełen pipeline (E2E)
+
+Po starcie vLLM, jedna komenda robi wszystko (mkdir + snapshot metrics + Step 1 + Step 2 + analiza):
+
+```bash
+python3 -u scripts/run_full.py --out-dir final_result --limit 0 --concurrency 8
+```
+
+Wyniki w `final_result/`:
+- `entity_layer.jsonl` — Step 1 output (encje + category + strength + metadata)
+- `final.jsonl` — Step 2 output (title, meta_description, h1, article_summary)
+- `summary.md` — raport jakościowy + 15 sample'i
+- `metrics_delta.txt` — cache hit rate w runie
+- `pipeline.log` — pełen log
+
+Estymowany czas dla 155 URL: ~10-15 min @ concurrency 8 na DGX Spark.
+
+## Wynik per encja (Azure NER)
+
+```json
+{
+  "name": "190°C",
+  "type": "Temperature",
+  "category": "Quantity",
+  "strength": "weak",
+  "metadata": {"unit": "Celsius", "value": 190}
+}
+```
+
+51 typów Azure z hierarchią 11 kategorii. Patrz [`docs/architecture.md`](docs/architecture.md) dla pełnego mappingu.
 
 ## Struktura projektu
 
