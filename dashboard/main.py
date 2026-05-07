@@ -19,7 +19,7 @@ from dashboard.data_loader import load_results, RESULTS_BASE  # noqa: E402
 from dashboard.components.filters import render_filters  # noqa: E402
 from dashboard.views import (  # noqa: E402
     run_summary, articles, entities, categories,
-    compare_runs, compare_onestep, logs,
+    compare_runs, compare_onestep, analytics, logs,
 )
 
 PAGES = {
@@ -29,6 +29,7 @@ PAGES = {
     "categories": ("Kategorie artykułów", categories),
     "compare_runs": ("Porównanie runów", compare_runs),
     "compare_onestep": ("One-step vs Two-step", compare_onestep),
+    "analytics": ("📈 Analiza jakości", analytics),
     "logs": ("Pipeline log", logs),
 }
 
