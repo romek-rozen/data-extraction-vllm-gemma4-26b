@@ -20,20 +20,19 @@ Actionable checklist per faza. Plan: `PLAN.md`. Spec: `INSTRUCTIONS_FROM_CLAUDE.
 - [x] Wyniki: `result/phase1_lengths.md` + `result/phase1_lengths.json`
 - [ ] A/B `include_tables` True vs False — opcjonalne, Phase 2 jeśli będą problemy z brakiem kontekstu z tabel
 
-## Phase 2 — Two-step vs one-step
+## Phase 2 — Two-step vs one-step ✅
 
-- [ ] `prompts/step1_system.md` (full English z INSTRUCTIONS sekcja "STEP 1")
-- [ ] `prompts/step2_system.md` (full English z INSTRUCTIONS sekcja "STEP 2")
-- [ ] `prompts/schema_step1.json` + `prompts/schema_step2.json`
-- [ ] `lib/vllm_client.py` (OpenAI-compat klient, `guided_json`, retry na timeout)
-- [ ] `lib/prompt_loader.py` (placeholder substitution dla Step 2: `{detected_language}`, `{category}`, `{entities_summary}`)
-- [ ] `lib/reporter.py` (thread-safe JSONL append, klucz `url_hash`)
-- [ ] `scripts/run_step1.py --limit N` → `result/entity_layer.jsonl`
-- [ ] `scripts/run_step2.py --limit N` (czyta entity_layer) → `result/final.jsonl`
-- [ ] `scripts/run_pipeline.py` (Step 1 + Step 2 sekwencyjnie)
-- [ ] One-step baseline w `scripts/run_one_step.py` (refaktoryzacja z `mateusz-g-json-vs-flat`)
-- [ ] 200 URL w obu trybach, eyeball jakości
-- [ ] **Decyzja**: two-step vs one-step
+- [x] `prompts/step1_system.md`, `step2_system.md`, schematy JSON
+- [x] `lib/vllm_client.py` (response_format json_schema, thinking OFF)
+- [x] `lib/prompt_loader.py` (cache + placeholder substitution)
+- [x] `lib/reporter.py` (thread-safe JSONL z idempotencją)
+- [x] `scripts/run_step1.py`, `run_step2.py`, `run_pipeline.py`
+- [x] `scripts/analyze_phase2.py` (statystyki + sample do eyeballa)
+- [x] `scripts/snapshot_metrics.py` (workaround dla `prompt_tokens_details: null`)
+- [x] **100 URL run @ concurrency 4: 100/100 OK** (Step 1 + Step 2)
+- [x] Throughput: 1,73 s/req amortized | Prefix cache hit rate: 72,2%
+- [x] Wnioski: `result/phase2_twostep.md` (encje median 15/max 33, output max 763 tok)
+- [-] One-step baseline POMINIĘTY — D7 zaktualizowany (smoke 3+100 URL pokazuje wystarczającą jakość)
 
 ## Phase 3 — A/B sampling
 

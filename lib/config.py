@@ -30,8 +30,8 @@ SAMPLING_DEFAULT = {
     "repetition_penalty": 1.0,  # NIE 1.2 — łamie powtarzające się klucze JSON
 }
 
-MAX_TOKENS_STEP1 = 400
-MAX_TOKENS_STEP2 = 300
+MAX_TOKENS_STEP1 = 2000   # 15 encji × ~15-25 tokenów (PL nazwy + type) + category + language ≈ 400-600; +bufor.
+MAX_TOKENS_STEP2 = 2000   # title 70 + meta 160 + h1 100 + summary 400 znaków ≈ ~250-350 tokenów (PL); +bufor.
 
 # Twardy sufit output tokenów (safety) — dla edge case'ów gdzie model próbowałby
 # wygenerować dużo tekstu (np. junkey, niespójny artykuł). Per faktyczny request

@@ -1,6 +1,10 @@
 {
   "type": "object",
   "properties": {
+     "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}$"
+    },
     "category": {
       "type": "string",
       "enum": [
@@ -20,14 +24,8 @@
         "Zoology, agriculture and forestry", "junkey"
       ]
     },
-    "language": {
-      "type": "string",
-      "pattern": "^[a-z]{2}$"
-    },
     "entities": {
       "type": "array",
-      "minItems": 0,
-      "maxItems": 15,
       "items": {
         "type": "object",
         "properties": {

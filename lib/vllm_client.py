@@ -78,17 +78,23 @@ class VLLMClient:
                 latency = time.perf_counter() - t0
                 r.raise_for_status()
                 data = r.json()
-                content = data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                content = choice["message"]["content"]
+                finish_reason = choice.get("finish_reason")
                 try:
                     parsed = json.loads(content)
                 except json.JSONDecodeError as e:
+                    err = f"json_parse: {e}"
+                    if finish_reason == "length":
+                        err = f"truncated_at_max_tokens (finish_reason=length, last char {len(content)}): {e}"
                     return {
                         "ok": False,
-                        "error": f"json_parse: {e}",
+                        "error": err,
                         "raw": content,
                         "parsed": None,
                         "usage": data.get("usage", {}),
                         "latency_s": latency,
+                        "finish_reason": finish_reason,
                     }
                 return {
                     "ok": True,
@@ -97,6 +103,7 @@ class VLLMClient:
                     "parsed": parsed,
                     "usage": data.get("usage", {}),
                     "latency_s": latency,
+                    "finish_reason": finish_reason,
                 }
             except (requests.Timeout, requests.ConnectionError) as e:
                 last_err = f"network_attempt_{attempt}: {e}"

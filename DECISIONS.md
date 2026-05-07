@@ -51,11 +51,12 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Dlaczego `repetition_penalty=1.0` a nie 1.2:** 1.2 łamie powtarzające się klucze JSON (np. `"name"`, `"type"` × 15 encji).
 - **A/B test Phase 3:** porównanie z 0.7/0.3 (Step 1) i 0.8/0.5 (Step 2). Domyślnie zostajemy przy A.
 
-### D7: Two-step pipeline (entity extraction + SEO meta)
+### D7: Two-step pipeline (entity extraction + SEO meta) — bez baseline one-step
 - **Co:** Step 1 (universal English prompts, language detection, entities + category) → pipe note → Step 2 (language-aware SEO meta).
 - **Dlaczego:** dwa zadania o fundamentalnie różnym charakterze — Step 1 deterministyczna ekstrakcja, Step 2 kreatywna generacja. Każdy może mieć osobny optymalny config (Phase 3).
 - **Wartość pipe note:** uniwersalna warstwa encji wielokrotnego użytku (knowledge graph, search, multilingual expansion).
-- **Walidacja:** Phase 2 — empiryczne porównanie two-step vs one-step na 200 URL.
+- **Walidacja (Phase 2):** smoke 3 URL pokazał wysoką jakość outputu (sensowne kategorie, idiomatyczne polskie meta, encje z Step 1 wykorzystane w Step 2). Decyzja: **pomijamy one-step baseline** — koszt implementacji + runa nie uzasadniony. Pełen run two-step na 100 URL jako finalne potwierdzenie skali. Jeśli pojawią się problemy jakościowe w Phase 4, wracamy do baseline.
+- **Status:** final, walidacja przez 100 URL run.
 
 ### D8: Tokenizer lokalny (Rust `tokenizers`) zamiast vLLM `/tokenize`
 - **Co:** `lib/tokenizer.py` używa `tokenizers.Tokenizer.from_file(tokenizer.json)` bezpośrednio z katalogu modelu.
@@ -73,6 +74,33 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Co:** Loader wyciąga `url_finish` (URL po redirectach), z niego `domain` (netloc) i `path`.
 - **Dlaczego nie `headers[]` z JSON:** czasem strony mają błędnie porobione headingi w HTML — black box, nie ufamy.
 - **Konsekwencja:** model wszystko ekstrahuje sam z markdownu. Model jest groundtruth, nie metadata strony.
+
+### D11.5: Najpierw obserwuj model, potem ograniczaj — reguła "no premature constraints"
+- **Co:** w pierwszych runach (Phase 2 walidacja) wszystkie parametry, które mogą ciąć/ograniczać output modelu, ustawiamy **hojnie lub na off**. Mierzymy realne zachowanie. **Dopiero potem** decydujemy o ograniczeniach na podstawie danych.
+- **Konkretnie odnotowane:**
+  - `MAX_TOKENS_STEP1 = 2000`, `MAX_TOKENS_STEP2 = 2000` (start; po pomiarze ewentualnie tnij).
+  - `entities`: zdjęte `minItems: 0` i `maxItems: 15` ze schemy. Niech model sam zdecyduje ile encji wyciągnie.
+  - `name.maxLength: 100` zostaje (cap na zewnętrzny outlier, nie ograniczenie liczby).
+  - System prompt nadal sugeruje "Maximum 15 most important entities" — to **soft hint** dla modelu, nie hard constraint. Model może go zignorować jeśli artykuł wymaga inaczej.
+- **Dlaczego:**
+  - Szacunki tokenów per pole są nieprecyzyjne (PL ma więcej tokenów per znak niż EN, struktura JSON dorzuca 50+).
+  - Pierwszy run na 400/300 max_tokens uciął odpowiedzi przy `finish_reason: length` — model nie zwraca błędu HTTP, wykrywamy dopiero po `json.JSONDecodeError`.
+  - `maxItems: 15` mogło dla niektórych artykułów obciąć wartościowe encje. Bez pomiaru "ile model normalnie wyciąga" nie wiemy czy 15 to dobry cap.
+- **Reguła ogólna:** każdy parametr który ma efekt twardego ograniczenia (`max_tokens`, `max_model_len`, `maxItems`, `maxLength`, truncation) — zaczynamy od ustawienia które **NIE jest aktywne** dla typowego runa. Mierzymy. Tnijemy tylko tam, gdzie dane uzasadniają.
+- **Status:** final reguła. **Faktyczne wartości z Phase 2 (100 URL, 100/100 OK):**
+  - **Step 1 output:** median 301 tok, p95 435, max **763**. → `MAX_TOKENS_STEP1=2000` znacząco zapasowe; bezpieczne `1000` (max+30%).
+  - **Step 2 output:** median 189 tok, p95 215, max **224**. → `MAX_TOKENS_STEP2=2000` mocno przesadzone; bezpieczne `400` (max+80%).
+  - **Liczba encji:** median **15**, p95 24, max **33**. Cap `maxItems: 15` ze schemy zdjęty słusznie — model normalnie wyciąga > 15.
+  - **Długości pól (znaki):** title median 60 (limit 70), meta 156 (target 140-160), h1 58 (limit 100), summary 261 (limit 400). Model trzyma się limitów naturalnie.
+  - **Throughput:** 172 s total / 100 URL @ concurrency 4 = **1,73 s/req amortized** (Step 1 sequential 9,7 s + Step 2 sequential 6,9 s).
+  - **Prefix cache hit rate:** 72,2% (1,49M tokenów queries, 1,08M hits) — bardzo blisko teoretycznego maks dla naszej dystrybucji.
+
+### D11.7: Diagnostyka prefix cache przez `/metrics`, nie przez response
+- **Problem:** vLLM build `gemma4-cu130` (0.19.1.dev6) zwraca `prompt_tokens_details: null` w `usage` response, niezależnie od cache hit. Per-request `cached_tokens` niedostępny.
+- **Workaround:** Prometheus endpoint `http://localhost:8001/metrics` zawsze raportuje agregowany `vllm:prefix_cache_queries_total` i `vllm:prefix_cache_hits_total`.
+- **Skrypt:** `scripts/snapshot_metrics.py before/after` + `diff` — liczy delta dla per-run hit rate.
+- **Stan na 2026-05-07 (Phase 2 + smoke testy):** hit rate **76,1%** (1 020 544 / 1 341 177 tokenów). System prompt Step 1 (2 929 tokenów) skutecznie cachowany.
+- **Status:** monitoring działa. Jeśli wgramy nowszy vLLM kiedyś, per-request `cached_tokens` może wrócić — ale `/metrics` zawsze pozostanie source-of-truth dla agregatów.
 
 ### D11: Flat layout (`lib/` + `scripts/`) zamiast `src/`
 - **Co:** Moduły importowalne w `lib/`, runnable entry points w `scripts/`. Brak `pyproject.toml`, brak `pip install -e .`.
