@@ -281,21 +281,84 @@ def analyze(out_dir: Path, twostep_wall: float, onestep_wall: float,
     report = out_dir / "report.md"
     lines: list[str] = []
     A = lines.append
+    # Decision criteria — D7b
+    CRIT_SPEEDUP = 1.5
+    CRIT_CAT = 0.90
+    CRIT_LANG = 0.95
+    CRIT_JACC = 0.5
+    cat_rate = cat_match / max(n, 1)
+    lang_rate = lang_match / max(n, 1)
+    jacc_mean = (sum(jaccard_vals) / len(jaccard_vals)) if jaccard_vals else 0.0
+
+    one_fail_rate = onestep_fail / max(len(onestep), 1)
+    two_total = max(len(set(twostep_step1_by_hash) | set(twostep_step2_by_hash)), 1)
+    two_ok_combined = sum(
+        1 for h in (set(twostep_step1_by_hash) | set(twostep_step2_by_hash))
+        if twostep_step1_by_hash.get(h, {}).get("ok")
+        and twostep_step2_by_hash.get(h, {}).get("ok")
+    )
+    two_fail_rate = (two_total - two_ok_combined) / two_total
+
+    thr_one = (onestep_ok / onestep_wall * 3600) if onestep_wall > 0 else 0.0
+    thr_two = (two_ok_combined / twostep_wall * 3600) if twostep_wall > 0 else 0.0
+
     A(f"# One-step vs Two-step — porównanie")
     A("")
     A(f"- Sample selection: **{'random' if random_sample else 'first-N (sorted)'}**"
       + (f", seed=`{seed}`" if random_sample else ""))
     A(f"- Sample size (common OK): **{n}**")
-    A(f"- One-step records: ok={onestep_ok}  fail={onestep_fail}")
+    A(f"- One-step records: ok={onestep_ok}  fail={onestep_fail}  fail_rate={100*one_fail_rate:.1f}%")
     A(f"- Two-step Step 1: ok={step1_ok}  fail={step1_fail}")
     A(f"- Two-step Step 2: ok={step2_ok}  fail={step2_fail}")
+    A(f"- Two-step combined OK (both steps ok): {two_ok_combined}/{two_total}  "
+      f"fail_rate={100*two_fail_rate:.1f}%")
+    A("")
+    A("## Verdict (D7b decision rule)")
+    A("")
+    A("| Criterion | Target | Actual | Pass? |")
+    A("|---|---|---|---|")
+    rows_v = [
+        ("Speedup wall (two/one)", f"≥ {CRIT_SPEEDUP:.1f}×", f"{speedup_wall:.2f}×",
+         speedup_wall >= CRIT_SPEEDUP),
+        ("Speedup per-URL (two/one)", f"≥ {CRIT_SPEEDUP:.1f}×", f"{speedup_per_url:.2f}×",
+         speedup_per_url >= CRIT_SPEEDUP),
+        ("Category match", f"≥ {int(100*CRIT_CAT)}%", f"{100*cat_rate:.1f}%",
+         cat_rate >= CRIT_CAT),
+        ("Language match", f"≥ {int(100*CRIT_LANG)}%", f"{100*lang_rate:.1f}%",
+         lang_rate >= CRIT_LANG),
+        ("Entity Jaccard mean", f"≥ {CRIT_JACC:.2f}", f"{jacc_mean:.3f}",
+         jacc_mean >= CRIT_JACC),
+        ("Fail rate one ≤ two", "—",
+         f"{100*one_fail_rate:.1f}% ≤ {100*two_fail_rate:.1f}%",
+         one_fail_rate <= two_fail_rate),
+    ]
+    for label, target, actual, ok in rows_v:
+        A(f"| {label} | {target} | {actual} | {'✅' if ok else '❌'} |")
+    all_pass = all(r[3] for r in rows_v)
+    speed_pass = rows_v[0][3] and rows_v[1][3]
+    quality_pass = rows_v[2][3] and rows_v[3][3] and rows_v[4][3]
+    if all_pass:
+        A("")
+        A("**→ One-step jest kandydatem na prod-default.** Wszystkie kryteria spełnione.")
+    elif speed_pass and not quality_pass:
+        A("")
+        A("**→ Two-step zostaje defaultem.** One-step szybsze, ale traci na jakości.")
+    elif quality_pass and not speed_pass:
+        A("")
+        A("**→ Two-step zostaje defaultem.** Jakość OK, ale brak istotnego speedupu.")
+    else:
+        A("")
+        A("**→ Two-step zostaje defaultem.** One-step nie spełnia ani speedu, ani jakości.")
     A("")
     A("## Speed")
     A("")
-    A(f"- **Total wall time** (subprocess time, w tym overhead startu skryptów):")
-    A(f"  - one-step: **{onestep_wall:.1f}s**")
-    A(f"  - two-step: **{twostep_wall:.1f}s**")
-    A(f"  - ratio two-step/one-step (im wyżej tym one-step szybszy): **{speedup_wall:.2f}×**")
+    A("**Wall time** = subprocess wall time z tego skryptu (start runnera → koniec). "
+      "Obejmuje load_articles, batchowanie, finalizację. Model **nie zwraca wall time** — "
+      "to nasz zewnętrzny pomiar. Per-request `latency_s` (poniżej) to round-trip HTTP do vLLM.")
+    A("")
+    A(f"- one-step wall: **{onestep_wall:.1f}s** → throughput **{thr_one:.0f} URL/h**")
+    A(f"- two-step wall: **{twostep_wall:.1f}s** → throughput **{thr_two:.0f} URL/h**")
+    A(f"- ratio two/one (im wyżej tym one-step szybszy): **{speedup_wall:.2f}×**")
     A("")
     A("- **Per-URL latency (mean / p50 / p95) [s]:**")
     A("")
