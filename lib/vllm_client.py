@@ -25,7 +25,7 @@ class VLLMClient:
         self,
         base_url: str = "http://localhost:8001/v1",
         model: str = "/model",
-        timeout: float = 180.0,
+        timeout: float = 300.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
