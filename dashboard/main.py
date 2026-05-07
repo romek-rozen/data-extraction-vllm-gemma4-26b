@@ -17,13 +17,14 @@ st.set_page_config(page_title="Two-Step Pipeline Dashboard", layout="wide")
 
 from dashboard.data_loader import load_results, RESULTS_BASE  # noqa: E402
 from dashboard.components.filters import render_filters  # noqa: E402
-from dashboard.views import run_summary, articles, entities, compare_runs  # noqa: E402
+from dashboard.views import run_summary, articles, entities, compare_runs, logs  # noqa: E402
 
 PAGES = {
     "run_summary": ("Run Summary", run_summary),
     "articles": ("Eksplorator artykułów", articles),
     "entities": ("Encje (typy/kategorie)", entities),
     "compare_runs": ("Porównanie runów", compare_runs),
+    "logs": ("Pipeline log", logs),
 }
 
 

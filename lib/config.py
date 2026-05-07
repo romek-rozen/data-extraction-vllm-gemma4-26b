@@ -28,7 +28,7 @@ VLLM_MODEL = "/model"  # ścieżka mountowana w kontenerze, override przez env
 
 # Concurrency — pipeline ≤ vLLM --max-num-seqs (obecnie 8 w scripts/start_vllm.sh).
 # Override per uruchomienie przez --concurrency flag w skryptach run_*.py.
-DEFAULT_CONCURRENCY = 8
+DEFAULT_CONCURRENCY = 4
 
 # Sampling — Phase 3 walidacja (decyzja D12 w DECISIONS.md):
 # - Step 1: A (Google default) — schema xgrammar dominuje, temperatura nie wpływa

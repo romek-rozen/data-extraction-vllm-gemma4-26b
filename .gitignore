@@ -38,3 +38,6 @@ models/
 
 # Logi
 *.log
+
+# Claude Code lokalne
+.claude/
