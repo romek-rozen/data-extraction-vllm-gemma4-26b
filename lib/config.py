@@ -22,13 +22,23 @@ MAX_ARTICLE_TOKENS = 20000
 VLLM_BASE_URL = "http://localhost:8001/v1"
 VLLM_MODEL = "/model"  # ścieżka mountowana w kontenerze, override przez env
 
-# Sampling — Google defaults dla Gemma 4 (INSTRUCTIONS_FROM_CLAUDE.md sekcja "Sampling parameters")
-SAMPLING_DEFAULT = {
+# Sampling — Phase 3 walidacja (decyzja D12 w DECISIONS.md):
+# - Step 1: A (Google default) — schema xgrammar dominuje, temperatura nie wpływa
+# - Step 2: B (0.8) — eliminuje rzadkie zapętlenia (1/100 przy temp 1.0)
+SAMPLING_STEP1 = {
     "temperature": 1.0,
     "top_p": 0.95,
     "top_k": 64,
     "repetition_penalty": 1.0,  # NIE 1.2 — łamie powtarzające się klucze JSON
 }
+SAMPLING_STEP2 = {
+    "temperature": 0.8,
+    "top_p": 0.9,
+    "top_k": 50,
+    "repetition_penalty": 1.0,
+}
+# Backward compat — wcześniejszy kod używał SAMPLING_DEFAULT
+SAMPLING_DEFAULT = SAMPLING_STEP1
 
 MAX_TOKENS_STEP1 = 2000   # 15 encji × ~15-25 tokenów (PL nazwy + type) + category + language ≈ 400-600; +bufor.
 MAX_TOKENS_STEP2 = 2000   # title 70 + meta 160 + h1 100 + summary 400 znaków ≈ ~250-350 tokenów (PL); +bufor.

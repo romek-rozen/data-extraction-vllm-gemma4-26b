@@ -102,6 +102,24 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Stan na 2026-05-07 (Phase 2 + smoke testy):** hit rate **76,1%** (1 020 544 / 1 341 177 tokenów). System prompt Step 1 (2 929 tokenów) skutecznie cachowany.
 - **Status:** monitoring działa. Jeśli wgramy nowszy vLLM kiedyś, per-request `cached_tokens` może wrócić — ale `/metrics` zawsze pozostanie source-of-truth dla agregatów.
 
+### D12: Sampling — Step 1 zostaje 1.0, Step 2 obniżamy do 0.8 (Phase 3 walidacja)
+- **Step 1 (entity extraction):** zostaje **A=(1.0, 0.95, 64)** Google default. Empiryczny test 100 URL × 3 configi (A=1.0, B=0.7, C=0.3): wszystkie 100/100 OK; encje median 14-15 (różnica trywialna); unikalne nazwy encji 784/793/787 (różnica <1,2%); 94/100 URL dostaje tę samą kategorię w wszystkich configach. Schema enforcement (xgrammar) dominuje nad temperaturą — token-level constraint wycina 99% przestrzeni decyzyjnej.
+- **Step 2 (SEO meta):** zmiana z A=(1.0, 0.95, 64) na **B=(0.8, 0.9, 50)**. Empiryczny test: A 99/100 OK (1 zapętlenie z `finish_reason=length`, 2000 tokenów), B i C 100/100 OK. Diversity tytułów identyczna (99-100/100 unikalnych). Wizualnie jakość outputów taka sama. Decyzja motywowana eliminacją rzadkich (~1%) zapętleń, nie jakością.
+- **Status:** final. `lib/config.py` ma `SAMPLING_STEP1`, `SAMPLING_STEP2` jako osobne configi.
+
+### D13: Niska temperatura NIE wystarczy dla determinizmu na Spark/Marlin
+- **Co:** Phase 3 consistency test (5 URL × 3 reruns × 2 configi, sequential concurrency=1):
+  - Config A (temp 1.0): 0/5 pełna identyczność, 0/5 te same nazwy, 0/5 sama liczba encji.
+  - Config C (temp 0.3): 0/5 pełna identyczność, 0/5 te same nazwy, **1/5 sama liczba encji**.
+- **Przykład:** "piłki gimnastyczne" vs "piłka gimnastyczna" (singular/plural) między runami; obecność/brak "plan treningowy".
+- **Dlaczego nie ma determinizmu:** trzy źródła niedeterminizmu w sumie:
+  1. Sampling losowy (temp > 0).
+  2. FP arytmetyka — różne rozmiary batchu w vLLM dają minimalnie różne logits.
+  3. Non-deterministic CUDA reductions w Marlin kernel (sm_121 fallback).
+- **Konsekwencja dla prod 21M URL:** **NIE polegamy na deterministycznym rerun** dla idempotencji. Mamy `url_hash` skip w `JsonlReporter.load_existing_hashes()` (D9) — rerun po crash nie nadpisuje OK rekordów. Jeśli ktoś chce wymusić rerun, używa `--no-skip` i akceptuje że output będzie **semantycznie ekwiwalentny ale nie bit-identyczny**.
+- **Co by dało prawdziwy determinizm:** `temperature=0.0` (greedy) + `seed=N` + concurrency=1 + jeden sprzętowy run. Niepraktyczne dla 21M URL na 1× 5090. Pomijamy.
+- **Status:** final. Architektura idempotencji opiera się na `url_hash` filter, nie na deterministycznym output.
+
 ### D11: Flat layout (`lib/` + `scripts/`) zamiast `src/`
 - **Co:** Moduły importowalne w `lib/`, runnable entry points w `scripts/`. Brak `pyproject.toml`, brak `pip install -e .`.
 - **Dlaczego:** `src/` layout to standard dla **bibliotek dystrybuowanych przez PyPI** — wymusza pakowanie i niesie boilerplate. Nasz projekt to research pipeline odpalany lokalnie, nie biblioteka. Flat jest spójny z siostrzanym projektem `mateusz-g-json-vs-flat/`.

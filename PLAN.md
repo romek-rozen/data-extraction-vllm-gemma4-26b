@@ -39,7 +39,7 @@ Walidacja two-step pipeline (entity extraction + SEO meta) na Gemma 4 26B A4B NV
 - Two-step ≥15% lepszy → kontynuujemy two-step.
 - <10% różnicy → one-step (taniej, prościej).
 
-### Phase 3: A/B sampling ⏳
+### Phase 3: A/B sampling ✅
 **Cel:** empirycznie dobrać temp/top_p/top_k.
 
 - Step 1: A=`(1.0, 0.95, 64)` Google default, B=`(0.7, 0.9, 50)`, C=`(0.3, 0.9, 40)` na 100 URL.
@@ -102,4 +102,4 @@ Network Volume 100GB, pobrać `nvidia/Gemma-4-26B-A4B-NVFP4`, skopiować kod, sm
 
 ## Status faz
 
-Phase 0 ✅ • Phase 1 ✅ • Phase 2 ✅ • Phase 2 ⏳ • Phase 3 ⏳ • Phase 4 ⏳ • Phase 5 ⏳ • Phase 6 ⏳ • Phase 7–9 ⏳
+Phase 0 ✅ • Phase 1 ✅ • Phase 2 ✅ • Phase 3 ✅ • Phase 2 ⏳ • Phase 3 ⏳ • Phase 4 ⏳ • Phase 5 ⏳ • Phase 6 ⏳ • Phase 7–9 ⏳

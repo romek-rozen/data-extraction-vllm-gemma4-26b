@@ -20,13 +20,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.config import (  # noqa: E402
     MAX_TOKENS_STEP2,
     RESULT_DIR,
-    SAMPLING_DEFAULT,
+    SAMPLING_STEP2,
     VLLM_BASE_URL,
     VLLM_MODEL,
     WEBSITES_DIR,
 )
 from lib.data_loader import load_articles  # noqa: E402
-from lib.prompt_loader import build_step2_user, load_schema, load_system_prompt  # noqa: E402
+from lib.pipeline import process_step2  # noqa: E402
+from lib.prompt_loader import load_schema, load_system_prompt  # noqa: E402
 from lib.reporter import JsonlReporter  # noqa: E402
 from lib.vllm_client import VLLMClient  # noqa: E402
 
@@ -35,43 +36,8 @@ logger = logging.getLogger("step2")
 
 
 def process_one(client, system, schema, article, entity_record):
-    if not entity_record.get("ok"):
-        return {
-            "url_hash": article["url_hash"],
-            "id": article["id"],
-            "ok": False,
-            "error": "step1_failed",
-        }
-    user = build_step2_user(
-        article_text=article["text"],
-        detected_language=entity_record.get("language") or "en",
-        category=entity_record.get("category") or "Other themes",
-        entities=entity_record.get("entities") or [],
-    )
-    res = client.chat_json(
-        system_prompt=system,
-        user_prompt=user,
-        json_schema=schema,
-        schema_name="step2",
-        max_tokens=MAX_TOKENS_STEP2,
-        **SAMPLING_DEFAULT,
-    )
-    record = {
-        "url_hash": article["url_hash"],
-        "id": article["id"],
-        "url": article["url"],
-        "domain": article["domain"],
-        "category": entity_record.get("category"),
-        "language": entity_record.get("language"),
-        "entities": entity_record.get("entities", []),
-        "ok": res["ok"],
-        "error": res["error"],
-        "latency_s": round(res["latency_s"], 3),
-        "usage": res["usage"],
-    }
-    if res["ok"] and res["parsed"]:
-        record.update(res["parsed"])  # title, meta_description, h1, article_summary
-    return record
+    return process_step2(client, system, schema, article, entity_record,
+                         max_tokens=MAX_TOKENS_STEP2, sampling=SAMPLING_STEP2)
 
 
 def main():

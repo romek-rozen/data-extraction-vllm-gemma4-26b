@@ -34,14 +34,15 @@ Actionable checklist per faza. Plan: `PLAN.md`. Spec: `INSTRUCTIONS_FROM_CLAUDE.
 - [x] Wnioski: `result/phase2_twostep.md` (encje median 15/max 33, output max 763 tok)
 - [-] One-step baseline POMINIĘTY — D7 zaktualizowany (smoke 3+100 URL pokazuje wystarczającą jakość)
 
-## Phase 3 — A/B sampling
+## Phase 3 — A/B sampling ✅
 
-- [ ] `scripts/ab_sampling.py --step 1 --configs A,B,C`
-- [ ] Step 1: A=(1.0, 0.95, 64), B=(0.7, 0.9, 50), C=(0.3, 0.9, 40) × 100 URL
-- [ ] Step 2: A=(1.0, 0.95, 64), B=(0.8, 0.9, 50), C=(0.5, 0.9, 40) × 100 URL
-- [ ] Metryki: # encji, różnorodność, consistency (3× rerun)
-- [ ] Eyeball "stupidity check"
-- [ ] **Decyzja** zapisana w `PLAN.md` + `result/phase3_sampling.md`
+- [x] `scripts/ab_sampling.py` + `analyze_phase3.py` + `lib/pipeline.py` (refaktor)
+- [x] Step 1 A/B/C × 100 URL: 100/100 OK we wszystkich, encje median 14-15, 94% URL→ta sama kategoria
+- [x] Step 2 A/B/C × 100 URL: A 99/100 (1 zapętlenie), B,C 100/100, diversity ~100/100
+- [x] Consistency 5 URL × 3 reruns × A,C: 0/5 pełna identyczność nawet przy temp 0.3 — **niska temp NIE daje determinizmu na Marlin sm_121**
+- [x] **Decyzja D12:** Step 1 zostaje 1.0, Step 2 → 0.8 (eliminuje zapętlenia)
+- [x] **Decyzja D13:** idempotencja przez `url_hash` skip, nie deterministic rerun
+- [x] Wyniki: `result/phase3_compare.md`
 
 ## Phase 4 — Prompt iteration
 

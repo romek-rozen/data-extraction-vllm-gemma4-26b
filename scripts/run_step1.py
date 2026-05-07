@@ -19,13 +19,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.config import (  # noqa: E402
     MAX_TOKENS_STEP1,
     RESULT_DIR,
-    SAMPLING_DEFAULT,
+    SAMPLING_STEP1,
     VLLM_BASE_URL,
     VLLM_MODEL,
     WEBSITES_DIR,
 )
 from lib.data_loader import load_articles  # noqa: E402
-from lib.prompt_loader import build_step1_user, load_schema, load_system_prompt  # noqa: E402
+from lib.pipeline import process_step1  # noqa: E402
+from lib.prompt_loader import load_schema, load_system_prompt  # noqa: E402
 from lib.reporter import JsonlReporter  # noqa: E402
 from lib.vllm_client import VLLMClient  # noqa: E402
 
@@ -34,34 +35,8 @@ logger = logging.getLogger("step1")
 
 
 def process_one(client: VLLMClient, system: str, schema: dict, article: dict) -> dict:
-    user = build_step1_user(article["text"])
-    res = client.chat_json(
-        system_prompt=system,
-        user_prompt=user,
-        json_schema=schema,
-        schema_name="step1",
-        max_tokens=MAX_TOKENS_STEP1,
-        **SAMPLING_DEFAULT,
-    )
-    record = {
-        "url_hash": article["url_hash"],
-        "id": article["id"],
-        "url": article["url"],
-        "domain": article["domain"],
-        "path": article["path"],
-        "text_tokens": article["text_tokens"],
-        "ok": res["ok"],
-        "error": res["error"],
-        "latency_s": round(res["latency_s"], 3),
-        "usage": res["usage"],
-    }
-    if res["ok"] and res["parsed"]:
-        record.update({
-            "category": res["parsed"].get("category"),
-            "language": res["parsed"].get("language"),
-            "entities": res["parsed"].get("entities", []),
-        })
-    return record
+    return process_step1(client, system, schema, article,
+                         max_tokens=MAX_TOKENS_STEP1, sampling=SAMPLING_STEP1)
 
 
 def main():
