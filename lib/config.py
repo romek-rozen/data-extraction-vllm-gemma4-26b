@@ -41,7 +41,7 @@ SAMPLING_STEP2 = {
 SAMPLING_DEFAULT = SAMPLING_STEP1
 
 MAX_TOKENS_STEP1 = 4000   # v6: bez metadata, ale długie artykuły potrafią mieć 50+ encji × ~10-15 tok = 500-750; bufor 4000 dla outlierów (input 18k + output 4k = 22k < 24576 max-model-len).
-MAX_TOKENS_STEP2 = 600    # title+meta+h1+summary realnie ~250-350 tok; 600 = ~2× safety. Hit = patologiczny loop → fail-fast → retry-with-feedback.
+MAX_TOKENS_STEP2 = 2000   # title+meta+h1+summary realnie ~250-350 tok (max obserwowane v6: 214). Bufor 2000 daje modelowi powietrze; retry-with-feedback łapie ewentualne patologiczne loopy.
 
 # Twardy sufit output tokenów (safety) — dla edge case'ów gdzie model próbowałby
 # wygenerować dużo tekstu (np. junkey, niespójny artykuł). Per faktyczny request
