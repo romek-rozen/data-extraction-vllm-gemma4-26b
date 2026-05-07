@@ -12,7 +12,7 @@
 # - mount patcha gemma4_patched.py (sm_121 fix)
 # - flagi prod z INSTRUCTIONS_FROM_CLAUDE.md (Phase 0):
 #     --moe-backend marlin   (FP4 fallback dla sm_121)
-#     --max-model-len 24576  (bufor pod artykuły ~12k tokenów + system prompt + output, 24k = sweet spot batch/coverage)
+#     --max-model-len 32768  (32k — nadmiarowy bufor dla długich artykułów + Step 3 SPO triplets w przyszłości)
 #     --enable-prefix-caching
 #     --kv-cache-dtype fp8   (2× batch względem BF16)
 #     --gpu-memory-utilization 0.85
@@ -61,7 +61,7 @@ docker run -d --gpus all --ipc=host \
   --model /model \
   --quantization modelopt \
   --kv-cache-dtype fp8 \
-  --max-model-len 24576 \
+  --max-model-len 32768 \
   --max-num-seqs 8 \
   --gpu-memory-utilization 0.85 \
   --moe-backend marlin \
