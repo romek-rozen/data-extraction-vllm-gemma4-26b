@@ -676,6 +676,18 @@ def main():
 
     analyze(out_dir, twostep_wall=twostep_wall, onestep_wall=onestep_wall,
             random_sample=use_random, seed=use_seed)
+
+    # Glanceable artefakty: run_meta.json + timing.csv + summary.txt
+    finalize_log = out_dir / "finalize.log"
+    rc = subprocess.run(
+        ["python3", "scripts/finalize_compare.py", str(out_dir)],
+        cwd=ROOT, stdout=open(finalize_log, "w"), stderr=subprocess.STDOUT,
+    ).returncode
+    if rc != 0:
+        logger.warning(f"finalize_compare rc={rc} — zobacz {finalize_log}")
+    else:
+        logger.info(f"summary.txt + timing.csv + run_meta.json wygenerowane w {out_dir}")
+
     logger.info("=== DONE ===")
 
 
