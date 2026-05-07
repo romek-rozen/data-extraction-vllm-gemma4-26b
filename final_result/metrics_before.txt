@@ -1,0 +1,11 @@
+=== before ===
+  vllm:prefix_cache_queries_total                    = 7298138
+  vllm:prefix_cache_hits_total                       = 6346816
+  vllm:num_requests_running                          = 0
+  vllm:num_requests_waiting                          = 0
+  vllm:kv_cache_usage_perc                           = 0
+  vllm:prompt_tokens_total                           = 7298138
+  vllm:generation_tokens_total                       = 430089
+  vllm:request_success_total                         = 1354
+  vllm:e2e_request_latency_seconds_sum               = 0
+  vllm:e2e_request_latency_seconds_count             = 0
