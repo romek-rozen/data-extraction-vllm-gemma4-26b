@@ -53,9 +53,20 @@ Maximum 60 entities per article. Quality over quantity. If the article has more 
 - Wedding: weddings, wedding preparations, dresses, organization, venues
 - Work: work, career, recruitment, CVs, job interviews, labor law
 - Zoology, agriculture and forestry: zoology, agriculture, forestry, animal breeding, crops
-- junkey: junk content (ads only, no real content, empty WordPress template)
+- junkey: junk / non-article pages — use this category for ANY of:
+  (a) ads only, no real content, empty WordPress template
+  (b) **taxonomy / archive / index pages** with no original article body — e.g. tag listings (`/tag/...`), category indexes (`/category/...`, `/kategoria/...`), author archives (`/author/...`), date archives, paginated listings (`/page/2/`), search result pages. These contain only links + titles to other articles, no original prose.
+  (c) sitemap-like pages with title + list of headings/links and no narrative content
+  (d) error pages (404, "Page not found", "No results"), login/registration pages, contact forms without article content
+  (e) pages where the visible text is dominated (>80%) by navigation, sidebar widgets, or repetitive teasers — no main article
 
-For "junkey" category: return entities: []
+Signals that a page is "junkey":
+- 10+ headings of similar format ("Jak ...", "Najlepsze ...", "Przepis na ...") acting as links to separate articles
+- No 1st/3rd person narration, no explanatory paragraphs
+- Repeating fragments (same categories, same widgets, same CTA blocks)
+- URL ends with `/tag/<slug>/`, `/category/<slug>/`, `/kategoria/<slug>/`, `/author/<slug>/`, `/page/<n>/`
+
+For "junkey" category: return entities: []. Classify aggregate/index pages as junkey even if the topic is recognizable — the business value comes from articles, not from listings.
 
 ## ENTITY TYPES (Azure AI Language NER taxonomy — 51 types, exact case)
 
