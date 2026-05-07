@@ -129,60 +129,6 @@ This is the Microsoft Azure AI Language Service NER schema, production-grade and
 
 DO NOT INVENT NEW TYPES. Use exact case (`Person`, not `person`). Maximum entities: focus on semantically important; quality over quantity.
 
-## ENTITY METADATA (Azure resolutions — structured normalization)
-
-For numeric and temporal entities, ALSO provide `metadata` field with structured resolution. This converts text forms ("eighty", "180°C", "5 maja 2025") into consistent machine-readable values, enabling downstream filtering, sorting and aggregation.
-
-**Fill `metadata` ONLY for these 18 types:** Age, Area, Currency, Date, DateTime, Duration, Information (when it represents data size like KB/MB/GB), Length, Number, NumberRange, Ordinal, Percentage, SetTemporal, Speed, Temperature, Time, Volume, Weight.
-
-**For all other types — omit `metadata` entirely.**
-
-### Metadata schemas per type
-
-**Age** — `{"unit": "Year"|"Month"|"Week"|"Day"|"Unspecified", "value": <number>}`. Example "25 lat" → `{"unit": "Year", "value": 25}`
-
-**Area** — `{"unit": "SquareMeter"|"SquareFoot"|"SquareKilometer"|"SquareCentimeter"|"Acre"|"Unspecified", "value": <number>}`. Example "50 m²" → `{"unit": "SquareMeter", "value": 50}`
-
-**Currency** — `{"unit": "<currency name>", "value": <number>, "ISO4217": "<3-letter ISO 4217 code>"}`. Example "500 zł" → `{"unit": "Polish złoty", "value": 500, "ISO4217": "PLN"}`. "100 USD" → `{"unit": "US Dollar", "value": 100, "ISO4217": "USD"}`. "20 euro" → `{"unit": "Euro", "value": 20, "ISO4217": "EUR"}`
-
-**Date** — `{"timex": "<ISO 8601 YYYY-MM-DD or pattern>", "value": "<actual date YYYY-MM-DD>"}`. Use `XXXX` for unspecified parts. Example "5 maja 2025" → `{"timex": "2025-05-05", "value": "2025-05-05"}`. "12 kwietnia" (no year) → `{"timex": "XXXX-04-12", "value": "2026-04-12"}` (assume current/next year)
-
-**DateTime** — `{"timex": "YYYY-MM-DDTHH:MM:SS", "value": "<resolved>"}`. Example "5 maja 2025 o 10:30" → `{"timex": "2025-05-05T10:30:00", "value": "2025-05-05 10:30:00"}`
-
-**Duration** — `{"unit": "Second"|"Minute"|"Hour"|"Day"|"Week"|"Month"|"Year"|"Unspecified", "value": <number>}`. Example "30 minut" → `{"unit": "Minute", "value": 30}`. "2 godziny" → `{"unit": "Hour", "value": 2}`
-
-**Information** (only when representing data size) — `{"unit": "Bit"|"Byte"|"Kilobit"|"Kilobyte"|"Megabit"|"Megabyte"|"Gigabit"|"Gigabyte"|"Terabit"|"Terabyte"|"Petabit"|"Petabyte"|"Unspecified", "value": <number>}`. Example "30 MB" → `{"unit": "Megabyte", "value": 30}`. **For non-data Information (diseases, laws, anatomy), omit metadata.**
-
-**Length** — `{"unit": "Meter"|"Centimeter"|"Millimeter"|"Kilometer"|"Inch"|"Foot"|"Yard"|"Mile"|"Unspecified", "value": <number>}`. Example "30 cm" → `{"unit": "Centimeter", "value": 30}`
-
-**Number** — `{"numberKind": "Integer"|"Decimal"|"Fraction"|"Percent"|"Power"|"Unspecified", "value": <number>}`. Example "1000" → `{"numberKind": "Integer", "value": 1000}`. "3,14" → `{"numberKind": "Decimal", "value": 3.14}`
-
-**NumberRange** — `{"rangeKind": "Number"|"Age"|"Area"|"Currency"|"Length"|"Speed"|"Temperature"|"Volume"|"Weight"|"Information", "minimum": <number>, "maximum": <number>}`. Example "20-30 minut" → `{"rangeKind": "Number", "minimum": 20, "maximum": 30}`
-
-**Ordinal** — `{"offset": <int>, "relativeTo": "Current"|"Start"|"End", "value": "<text>"}`. Example "pierwszy" → `{"offset": 1, "relativeTo": "Start", "value": "first"}`. "ostatni" → `{"offset": 1, "relativeTo": "End", "value": "last"}`
-
-**Percentage** — `{"unit": "Percent", "value": <number>}`. Example "12%" → `{"unit": "Percent", "value": 12}`. "70 procent" → `{"unit": "Percent", "value": 70}`
-
-**SetTemporal** — `{"timex": "<ISO 8601 pattern>", "value": "not resolved"}`. Example "co poniedziałek o 18" → `{"timex": "XXXX-WXX-1T18", "value": "not resolved"}`
-
-**Speed** — `{"unit": "KilometersPerHour"|"MetersPerSecond"|"MilesPerHour"|"Knots"|"Unspecified", "value": <number>}`. Example "100 km/h" → `{"unit": "KilometersPerHour", "value": 100}`
-
-**Temperature** — `{"unit": "Celsius"|"Fahrenheit"|"Kelvin"|"Rankine"|"Unspecified", "value": <number>}`. Example "180°C" → `{"unit": "Celsius", "value": 180}`. "37 stopni" → `{"unit": "Celsius", "value": 37}` (assume Celsius for Polish/EU context)
-
-**Time** — `{"timex": "Thh:mm:ss", "value": "hh:mm:ss"}`. Example "14:30" → `{"timex": "T14:30:00", "value": "14:30:00"}`
-
-**Volume** — `{"unit": "Milliliter"|"Liter"|"CubicMeter"|"Cup"|"Tablespoon"|"Teaspoon"|"Pint"|"Quart"|"Gallon"|"Unspecified", "value": <number>}`. Example "200 ml" → `{"unit": "Milliliter", "value": 200}`. "1 litr" → `{"unit": "Liter", "value": 1}`
-
-**Weight** — `{"unit": "Gram"|"Kilogram"|"Milligram"|"MetricTon"|"Pound"|"Ounce"|"Stone"|"Unspecified", "value": <number>}`. Example "500 g" → `{"unit": "Gram", "value": 500}`. "2 kg" → `{"unit": "Kilogram", "value": 2}`
-
-### Metadata rules
-- For ranges like "20-30 minut" use NumberRange with rangeKind, NOT two separate Number entities
-- Convert text forms to numbers: "trzydzieści" → 30, "dwadzieścia pięć" → 25, "ósmy" → 8 (offset)
-- Keep `unit` strings exact as listed above (case-sensitive)
-- For currency, always include ISO4217 if known (PLN, USD, EUR, GBP, JPY, CHF, etc.)
-- For ambiguous dates without year, assume current year (2026); for dates that already passed in current year, use next year
-- Omit metadata entirely for types not in the list (Person, Organization, Product, Skill etc.)
-
 ## DISAMBIGUATION RULES
 
 ### Product is broad — covers all kinds of "things"
@@ -306,8 +252,8 @@ For numeric and temporal entities, ALSO provide `metadata` field with structured
 
 ## EXAMPLES
 
-### Example 1: Polish cooking article (with metadata for quantities)
-Input: "Klasyczny rosół na niedzielę. Potrzebujesz 500 g kurczaka, 2 marchewki, pietruszki, selera i lubczyku. Gotuj 2 godziny w 90°C..."
+### Example 1: Polish cooking article
+Input: "Klasyczny rosół na niedzielę. Potrzebujesz kurczaka, marchewki, pietruszki, selera i lubczyku. Gotuj 2 godziny w 90°C..."
 Output:
 {
   "category": "Cooking",
@@ -319,9 +265,8 @@ Output:
     {"name": "pietruszka", "type": "Product"},
     {"name": "seler", "type": "Product"},
     {"name": "lubczyk", "type": "Product"},
-    {"name": "500 g", "type": "Weight", "metadata": {"unit": "Gram", "value": 500}},
-    {"name": "2 godziny", "type": "Duration", "metadata": {"unit": "Hour", "value": 2}},
-    {"name": "90°C", "type": "Temperature", "metadata": {"unit": "Celsius", "value": 90}}
+    {"name": "2 godziny", "type": "Duration"},
+    {"name": "90°C", "type": "Temperature"}
   ]
 }
 
@@ -356,20 +301,18 @@ Output:
   ]
 }
 
-### Example 4: German finance article (with metadata for date / percentage / currency)
-Input: "Die Europäische Zentralbank hat die Zinsen am 5. Mai 2025 um 0,25% auf 4,75% erhöht. Die Mindesteinlage beträgt 1000 Euro. Bitcoin reagierte mit einem Kursrückgang von 5%..."
+### Example 4: German finance article
+Input: "Die Europäische Zentralbank hat die Zinsen am 5. Mai 2025 um 0,25% erhöht. Bitcoin reagierte mit einem Kursrückgang in Höhe von 5%..."
 Output:
 {
   "category": "Finance, Banking and Insurance",
   "language": "de",
   "entities": [
     {"name": "Europäische Zentralbank", "type": "Organization"},
-    {"name": "5. Mai 2025", "type": "Date", "metadata": {"timex": "2025-05-05", "value": "2025-05-05"}},
-    {"name": "0,25%", "type": "Percentage", "metadata": {"unit": "Percent", "value": 0.25}},
-    {"name": "4,75%", "type": "Percentage", "metadata": {"unit": "Percent", "value": 4.75}},
-    {"name": "1000 Euro", "type": "Currency", "metadata": {"unit": "Euro", "value": 1000, "ISO4217": "EUR"}},
+    {"name": "5. Mai 2025", "type": "Date"},
+    {"name": "0,25%", "type": "Percentage"},
     {"name": "bitcoin", "type": "Product"},
-    {"name": "5%", "type": "Percentage", "metadata": {"unit": "Percent", "value": 5}}
+    {"name": "5%", "type": "Percentage"}
   ]
 }
 

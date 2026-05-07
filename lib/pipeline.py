@@ -10,6 +10,105 @@ from lib.prompt_loader import build_step1_user, build_step2_user
 from lib.vllm_client import VLLMClient
 
 
+# Mapping type → (category, strength). Czysty Azure NER (51 typów, 11 kategorii).
+# Spec: https://learn.microsoft.com/en-us/azure/ai-services/language-service/named-entity-recognition/concepts/named-entity-categories
+#
+# - category: Azure high-level Category (Person, Organization, Location, Event, Product, Quantity, DateTime, Skill, Information, Address, Email, IpAddress, PhoneNumber, URL, PersonType)
+# - strength: strong = encja istnieje samodzielnie z ID w bazie wiedzy (Wikidata, schema.org); weak = kontekstowo-zależna
+TYPE_TO_CATEGORY: dict[str, tuple[str, str]] = {
+    # Person
+    "Person":                        ("Person", "strong"),
+    "PersonType":                    ("PersonType", "weak"),
+    # Organization
+    "Organization":                  ("Organization", "strong"),
+    "OrganizationMedical":           ("Organization", "strong"),
+    "OrganizationSports":            ("Organization", "strong"),
+    "OrganizationStockExchange":     ("Organization", "strong"),
+    # Location
+    "Location":                      ("Location", "strong"),
+    "City":                          ("Location", "strong"),
+    "Continent":                     ("Location", "strong"),
+    "CountryRegion":                 ("Location", "strong"),
+    "State":                         ("Location", "strong"),
+    "GPE":                           ("Location", "strong"),
+    "Geographical":                  ("Location", "strong"),
+    "Airport":                       ("Location", "strong"),
+    "Structural":                    ("Location", "strong"),
+    "Address":                       ("Address", "weak"),
+    # Event
+    "Event":                         ("Event", "strong"),
+    "CulturalEvent":                 ("Event", "strong"),
+    "NaturalEvent":                  ("Event", "strong"),
+    "SportsEvent":                   ("Event", "strong"),
+    # Product
+    "Product":                       ("Product", "strong"),
+    "ComputingProduct":              ("Product", "strong"),
+    # Quantity
+    "Number":                        ("Quantity", "weak"),
+    "NumberRange":                   ("Quantity", "weak"),
+    "Ordinal":                       ("Quantity", "weak"),
+    "Currency":                      ("Quantity", "weak"),
+    "Percentage":                    ("Quantity", "weak"),
+    "Age":                           ("Quantity", "weak"),
+    "Dimension":                     ("Quantity", "weak"),
+    "Area":                          ("Quantity", "weak"),
+    "Length":                        ("Quantity", "weak"),
+    "Height":                        ("Quantity", "weak"),
+    "Volume":                        ("Quantity", "weak"),
+    "Weight":                        ("Quantity", "weak"),
+    "Speed":                         ("Quantity", "weak"),
+    "Temperature":                   ("Quantity", "weak"),
+    # DateTime
+    "Date":                          ("DateTime", "weak"),
+    "Time":                          ("DateTime", "weak"),
+    "DateTime":                      ("DateTime", "weak"),
+    "DateRange":                     ("DateTime", "weak"),
+    "TimeRange":                     ("DateTime", "weak"),
+    "DateTimeRange":                 ("DateTime", "weak"),
+    "Duration":                      ("DateTime", "weak"),
+    "SetTemporal":                   ("DateTime", "weak"),
+    "Temporal":                      ("DateTime", "weak"),
+    # Communication / Identifiers
+    "Email":                         ("Email", "weak"),
+    "PhoneNumber":                   ("PhoneNumber", "weak"),
+    "URL":                           ("URL", "weak"),
+    "IpAddress":                     ("IpAddress", "weak"),
+    # Skill / Information
+    "Skill":                         ("Skill", "weak"),
+    "Information":                   ("Information", "weak"),
+}
+
+
+def enrich_entity(entity: dict) -> dict:
+    """Dodaj pola `category` i `strength` na podstawie `type`."""
+    t = entity.get("type", "Other")
+    cat, strength = TYPE_TO_CATEGORY.get(t, ("Other", "weak"))
+    return {**entity, "category": cat, "strength": strength}
+
+
+def dedup_entities(entities: list[dict]) -> list[dict]:
+    """Dedup encji w obrębie pojedynczego artykułu.
+
+    Klucz dedupu: (name.lower(), type) — case-insensitive po nazwie.
+    Encja z tą samą nazwą ale różnym typem jest zachowana (model świadomie
+    zaklasyfikował ją kontekstowo).
+
+    Globalny dedup (między artykułami) NIE robimy — encje typu "jogurt" są
+    raz dishem, raz ingredientem zależnie od kontekstu artykułu (decyzja D15).
+
+    Zachowuje pierwsze wystąpienie + jego kolejność.
+    """
+    seen = set()
+    out = []
+    for e in entities:
+        key = (e.get("name", "").lower(), e.get("type", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
+
+
 def process_step1(
     client: VLLMClient,
     system: str,
@@ -41,10 +140,14 @@ def process_step1(
         "finish_reason": res.get("finish_reason"),
     }
     if res["ok"] and res["parsed"]:
+        raw = res["parsed"].get("entities", [])
+        deduped = dedup_entities(raw)
+        enriched = [enrich_entity(e) for e in deduped]
         record.update({
             "category": res["parsed"].get("category"),
             "language": res["parsed"].get("language"),
-            "entities": res["parsed"].get("entities", []),
+            "entities": enriched,
+            "entities_raw_count": len(raw),  # ile model wygenerował przed dedupem
         })
     return record
 
