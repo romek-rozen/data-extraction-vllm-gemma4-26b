@@ -75,6 +75,24 @@ Readiness check:
 
 → Migracja na RunPod RTX 5090.
 
+### Phase 5b: One-step vs two-step revisit ⏳
+**Cel:** ile realnie zyskujemy na czasie w one-step i ile tracimy na jakości — na tej samej próbce, na obecnym promptcie/schemie v6.
+
+W Phase 2 one-step został pominięty (D7) bez twardych liczb na obecnym layoucie (Azure NER 51 typów, prompty v6, sampling D12). Wracamy do tego pomiaru — minimalny wysiłek, zero zmian w produkcyjnej ścieżce two-step.
+
+**Zakres:**
+- One-step prompt + schemat: `prompts/step_onestep_system.md`, `prompts/schema_onestep.json` (entities + language + category + title + meta_description + h1 + article_summary w jednym JSON-ie).
+- One-step pipeline: `lib/pipeline_onestep.py` + `scripts/run_onestep.py` (równoległa ścieżka, NIE rusza istniejącego two-step).
+- Skrypt porównawczy: `scripts/compare_onestep_vs_twostep.py` — uruchamia obie ścieżki na tym samym sample (default 20 URL, opcja do 100), zbiera latency / output tokens / fail rate i jakość: zgodność language, zgodność category, Jaccard encji (name+type, lowercased), długości i braki pól SEO. Output: `final_results/<ts>__compare_onestep/{onestep.jsonl, entity_layer.jsonl, final.jsonl, report.md}`.
+
+**Metryki:**
+- Speed: total wall time, mean/p50/p95 latency per URL, prompt+completion tokens (suma i mean), fail rate.
+- Quality: language match %, category match %, entity Jaccard mean+median, intersection size, SEO meta lengths, missing fields.
+
+**Decision rule:**
+- speedup wall ≥ 1.5× **i** category match ≥ 90% **i** Jaccard ≥ 0.5 → one-step jako kandydat na prod (kolejna runda walidacji ×100 URL + eyeball).
+- W innym wypadku zostaje two-step; raport z liczbami → `DECISIONS.md` (uzupełnienie D7).
+
 ## Stage B — RunPod RTX 5090 (production, placeholder)
 
 ### Phase 7: RunPod setup ⏳

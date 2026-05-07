@@ -140,11 +140,33 @@ python3 -u scripts/run_full.py --limit 0 --concurrency 8 --tag baseline
 python3 -u scripts/run_full.py --resume                                  # najnowszy z final_results/
 python3 -u scripts/run_full.py --resume final_results/<ts>__<tag>        # konkretny
 
+# losowa próbka (reprezentatywna, nie pierwsze N alfabetycznie)
+python3 -u scripts/run_full.py --limit 1000 --random --tag rnd_1k
+# Seed (default 42) zapisany do <out_dir>/sample_seed.txt — przy --resume
+# wczytywany automatycznie, żeby resume nie rozjechał zestawu URL.
+
 # stary tryb z custom katalogiem wciąż działa
 python3 -u scripts/run_full.py --out-dir final_result --limit 0 --concurrency 8
 ```
 
 `--resume` pomija URL'e które mają już `ok=True` w `entity_layer.jsonl` / `final.jsonl`. Failsy są ponownie podejmowane.
+
+### One-step vs two-step (Phase 5b — baseline porównawczy)
+
+```bash
+# uruchomienie obu ścieżek na tym samym sample'u + raport
+python3 scripts/compare_onestep_vs_twostep.py --limit 20 --concurrency 4
+# → final_results/<ts>__compare_onestep/{onestep.jsonl, entity_layer.jsonl, final.jsonl, report.md}
+
+# tylko jedna ścieżka (np. do mierzenia wpływu prefix-cache po purge):
+python3 scripts/compare_onestep_vs_twostep.py --limit 20 --only onestep
+python3 scripts/compare_onestep_vs_twostep.py --limit 20 --only twostep
+
+# samodzielny one-step (bez porównania)
+python3 scripts/run_onestep.py --limit 20 --concurrency 4
+```
+
+Mierzy speed (wall, latency p50/p95, output tokens, attempts) i quality (language match, category match, Jaccard encji name+type, długości pól SEO). Decision rule: **speedup ≥ 1.5× wall AND category match ≥ 90% AND Jaccard ≥ 0.5** → kandydat do prod. Wyniki w dashboardzie pod widokiem "One-step vs Two-step". Two-step pozostaje defaultem dopóki one-step nie spełni reguły.
 
 Wyniki w `final_results/<ts>__<tag>/`:
 - `entity_layer.jsonl` — Step 1 output (encje + category + strength + metadata)
@@ -177,9 +199,11 @@ CLAUDE.md, PLAN.md, TODO.md, README.md
 lib/
   data_loader.py              ← trafilatura markdown + url_hash
   config.py                   ← ścieżki, sampling, vLLM URL
+  pipeline_onestep.py         ← one-step ścieżka (Phase 5b baseline)
 prompts/
   step1_system.md, step2_system.md
   schema_step1.json, schema_step2.json
+  step_onestep_system.md, schema_onestep.json   ← one-step (Phase 5b)
 websites/<sha-hash>/
   html.gz, json.gz            ← input (1 katalog = 1 URL)
 result/                        ← output: entity_layer.jsonl, final.jsonl

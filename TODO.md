@@ -75,6 +75,23 @@ Actionable checklist per faza. Plan: `PLAN.md`. Spec: `INSTRUCTIONS_FROM_CLAUDE.
 - [ ] Performance test 5000 URL
 - [ ] Production run 21M URL
 
+## Phase 5b — One-step vs two-step revisit
+
+Cel: zmierzyć speedup vs koszt jakości one-step na obecnym promptcie/schemie v6. Bez zmian w produkcyjnej ścieżce two-step.
+
+- [x] `prompts/schema_onestep.json` — schema łącząca Step1 + Step2 (entities, language, category, title, meta_description, h1, article_summary)
+- [x] `prompts/step_onestep_system.md` — system prompt (English; junkey → puste/placeholder meta)
+- [x] `lib/pipeline_onestep.py` — `process_onestep()` z dedup_entities + enrich_entity (reuse z lib/pipeline.py)
+- [x] `scripts/run_onestep.py` — runner idempotentny po url_hash, sampling=SAMPLING_STEP1, max_tokens=NUM_PREDICT (4096)
+- [x] `scripts/compare_onestep_vs_twostep.py` — uruchamia oba pipeline'y na tym samym sample, generuje `report.md` z metrykami speed/quality
+- [ ] Smoke 5 URL: `python3 scripts/compare_onestep_vs_twostep.py --limit 5 --concurrency 4 --tag smoke` — sanity (czy schema xgrammar nie wybucha, czy SEO meta jest w języku artykułu)
+- [ ] Run 20 URL: `python3 scripts/compare_onestep_vs_twostep.py --limit 20 --concurrency 4 --tag mini` — pierwszy realny pomiar
+- [ ] Run 100 URL (po pozytywnym mini): `--limit 100 --concurrency 8 --tag baseline100`
+- [ ] Sanity check na losowej próbce: `--limit 30 --random --seed 7 --tag rand7` — sprawdza czy first-N nie jest niereprezentatywny
+- [ ] Eyeball 10 sample diff (one vs two: title/meta_desc/encje) — czy jakość jednego jest tańsza niż drugiego
+- [ ] Wpis do `DECISIONS.md` (uzupełnienie D7) z liczbami: speedup wall, per-URL latency, category/lang match %, Jaccard, fail rate
+- [ ] Decyzja: one-step prod-kandydat / odrzucony / dalsza iteracja promptu one-step
+
 ## Otwarte decyzje
 
 - [x] `include_tables` w trafilatura (Phase 1 A/B)

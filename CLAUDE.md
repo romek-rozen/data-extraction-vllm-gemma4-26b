@@ -63,7 +63,7 @@ websites/<hash>/              ← input
 ## Konwencje
 
 - **Markdown w ekstrakcji** — `output_format="markdown"`, `include_links=True`, `include_formatting=True`, `include_comments=False`, `include_tables=True`. Powód: model ekstrahuje encje + SEO meta — nagłówki/linki/bold/tabele to bezpośrednie sygnały. Koszt vs plain text ~+2,86% mediana (Phase 1 pomiar).
-- **Two-step jako default** — one-step tylko jako baseline porównawczy w Phase 2.
+- **Two-step jako default** — one-step jako baseline porównawczy. Pierwotnie odrzucony w Phase 2 (D7), revisitowany w **Phase 5b** na promptcie/schemie v6 — patrz `lib/pipeline_onestep.py`, `prompts/step_onestep_system.md`, `scripts/run_onestep.py`, `scripts/compare_onestep_vs_twostep.py`, `dashboard/views/compare_onestep.py`. Zmiana defaultu wymaga twardych liczb (speedup ≥1.5× wall + category match ≥90% + Jaccard encji ≥0.5) → `DECISIONS.md`.
 - **Sampling: Google defaults** — `temperature=1.0, top_p=0.95, top_k=64, repetition_penalty=1.0` (NIE 1.2 — łamie powtarzające się klucze JSON). Niższe temperatury tylko z empirycznym dowodem (Phase 3 A/B).
 - **Idempotencja** — klucz `url_hash = sha256(url)`; rerun nie duplikuje.
 - **Prefix caching ON** — system prompty w cache, `enable_prefix_caching` w vLLM.
@@ -98,6 +98,13 @@ streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501
 # Pojedyncze fazy
 python3 -u scripts/run_step1.py --limit 100 --concurrency 8
 python3 -u scripts/run_step2.py --limit 100 --concurrency 8
+
+# One-step revisit (Phase 5b — baseline porównawczy do two-step na v6 promptcie)
+python3 scripts/run_onestep.py --limit 20 --concurrency 4
+python3 scripts/compare_onestep_vs_twostep.py --limit 20 --concurrency 4
+python3 scripts/compare_onestep_vs_twostep.py --resume final_results/<ts>__compare_onestep
+# Output: final_results/<ts>__compare_onestep/{onestep.jsonl, entity_layer.jsonl, final.jsonl, report.md}
+# Wymaga działającego vLLM. Idempotentny po url_hash. Flagą --only można odpalić jedną ścieżkę.
 
 # A/B sampling
 python3 scripts/ab_sampling.py --step 1 --limit 100 --concurrency 8

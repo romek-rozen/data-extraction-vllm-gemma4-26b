@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "properties": {
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}$"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "Automotive", "Beauty", "Business", "Computer games", "Construction",
+        "Cooking", "Culture, Art", "Diet, Weight loss", "Ecology",
+        "Economy, Industry", "Education, Science", "Entertainment",
+        "Family, Child, Pregnancy", "Fashion", "Finance, Banking and Insurance",
+        "Gastronomy", "Gossip, Celebrity Life, Lifestyle", "Health, Medicine",
+        "History", "House, Garden, Interiors",
+        "Household appliances and consumer electronics",
+        "IT, New technologies, Computers", "Law", "Marketing, Advertising, Media",
+        "Music", "News", "Other themes", "Photography and video-filming",
+        "Politics", "Power engineering", "Psychology, Personal development",
+        "Purchases, Opinions", "Real estate", "Religion", "Sex and eroticism",
+        "Sport, Fitness, Bodybuilding", "Tourism, Travel",
+        "Transport & Logistics", "Wedding", "Work",
+        "Zoology, agriculture and forestry", "junkey"
+      ]
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "maxLength": 100},
+          "type": {
+            "type": "string",
+            "enum": [
+              "Address", "Age", "Airport", "Area", "City", "ComputingProduct",
+              "Continent", "CountryRegion", "CulturalEvent", "Currency",
+              "Date", "DateRange", "DateTime", "DateTimeRange", "Dimension",
+              "Duration", "Email", "Event", "Geographical", "GPE", "Height",
+              "Information", "IpAddress", "Length", "Location", "NaturalEvent",
+              "Number", "NumberRange", "Ordinal", "Organization",
+              "OrganizationMedical", "OrganizationSports",
+              "OrganizationStockExchange", "Percentage", "Person", "PersonType",
+              "PhoneNumber", "Product", "SetTemporal", "Skill", "Speed",
+              "SportsEvent", "State", "Structural", "Temperature", "Temporal",
+              "Time", "TimeRange", "URL", "Volume", "Weight"
+            ]
+          }
+        },
+        "required": ["name", "type"]
+      }
+    },
+    "title": {"type": "string", "maxLength": 70},
+    "meta_description": {"type": "string", "maxLength": 160},
+    "h1": {"type": "string", "maxLength": 100},
+    "article_summary": {"type": "string", "maxLength": 400}
+  },
+  "required": [
+    "language", "category", "entities",
+    "title", "meta_description", "h1", "article_summary"
+  ]
+}
