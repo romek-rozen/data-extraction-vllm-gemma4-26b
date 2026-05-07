@@ -49,6 +49,11 @@ def main():
     parser.add_argument("--websites", default=str(WEBSITES_DIR))
     parser.add_argument("--no-skip", action="store_true",
                         help="Wymuś rerun nawet dla już przetworzonych URL")
+    parser.add_argument("--random", action="store_true",
+                        help="Weź losową próbkę --limit URL zamiast pierwszych N alfabetycznie. "
+                             "Reproducible przez --seed.")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Seed dla --random (default 42). Ten sam seed = ten sam zestaw URL.")
     args = parser.parse_args()
 
     client = VLLMClient(base_url=VLLM_BASE_URL, model=VLLM_MODEL)
@@ -59,7 +64,8 @@ def main():
     if existing:
         logger.info(f"Skip {len(existing)} URL już w {args.out}")
 
-    articles = load_articles(args.websites, limit=args.limit)
+    articles = load_articles(args.websites, limit=args.limit,
+                             random_sample=args.random, seed=args.seed)
     todo = [a for a in articles if a["url_hash"] not in existing]
     logger.info(f"Do przetworzenia: {len(todo)}/{len(articles)}")
 

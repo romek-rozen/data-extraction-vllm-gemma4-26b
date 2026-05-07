@@ -88,6 +88,10 @@ python3 -u scripts/run_full.py --limit 0 --concurrency 8                     # a
 python3 -u scripts/run_full.py --limit 0 --concurrency 8 --tag v6_baseline   # final_results/<ts>__v6_baseline/
 python3 -u scripts/run_full.py --resume                                      # wznów najnowszy run (idempotencja po url_hash, fails są ponawiane)
 
+# Losowa próbka (reprezentatywna, nie pierwsze N alfabetycznie)
+python3 -u scripts/run_full.py --limit 1000 --random --tag rnd_1k            # seed=42, zapisany w out_dir/sample_seed.txt
+python3 -u scripts/run_full.py --resume                                      # przy resume seed wczytany automatycznie
+
 # Dashboard Streamlit (analiza wyników z final_results/)
 streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501
 

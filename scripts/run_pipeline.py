@@ -35,11 +35,17 @@ def main():
     parser.add_argument("--no-skip", action="store_true")
     parser.add_argument("--out-dir", default=None,
                         help="Katalog na wyniki (domyślnie result/). Tworzony automatycznie.")
+    parser.add_argument("--random", action="store_true",
+                        help="Losowa próbka --limit URL zamiast pierwszych N alfabetycznie.")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Seed dla --random (default 42, reproducible).")
     args = parser.parse_args()
 
     common = ["--limit", str(args.limit), "--concurrency", str(args.concurrency)]
     if args.no_skip:
         common.append("--no-skip")
+    if args.random:
+        common += ["--random", "--seed", str(args.seed)]
 
     if args.out_dir:
         out_dir = Path(args.out_dir)

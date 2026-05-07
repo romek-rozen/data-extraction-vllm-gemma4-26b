@@ -70,20 +70,47 @@ def url_hash(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-def load_articles(input_dir: str | Path, limit: int = 0) -> list[dict]:
+def load_articles(
+    input_dir: str | Path,
+    limit: int = 0,
+    random_sample: bool = False,
+    seed: int = 42,
+) -> list[dict]:
     """Skanuj katalog wejściowy i załaduj artykuły do batcha.
 
     Zwraca deterministycznie posortowaną listę dictów:
         {id, text (markdown), url, domain, path, url_hash, text_len}.
     Artykuły, dla których trafilatura zwraca None, są pomijane.
+
+    Args:
+        random_sample: jeśli True i limit > 0, weź losową próbkę zamiast
+            pierwszych N posortowanych. Reproducible — ten sam seed zawsze
+            daje ten sam zestaw subkatalogów.
+        seed: ziarno PRNG dla random_sample (default 42).
     """
+    import random
+
     input_path = Path(input_dir)
     articles: list[dict] = []
 
-    subdirs = sorted(
+    all_subdirs = [
         d for d in input_path.iterdir()
         if d.is_dir() and (d / "html.gz").exists()
-    )
+    ]
+
+    if random_sample and limit > 0 and limit < len(all_subdirs):
+        # Sortuj najpierw dla determinizmu (kolejność iterdir() bywa różna),
+        # potem losuj z fixed seed — daje reproducible sample.
+        all_subdirs.sort()
+        rng = random.Random(seed)
+        chosen = rng.sample(all_subdirs, limit)
+        # Po wyborze sortuj dla deterministycznej kolejności przetwarzania
+        subdirs = sorted(chosen)
+        logger.info(
+            f"Random sample: {limit} z {len(all_subdirs)} subdirów (seed={seed})"
+        )
+    else:
+        subdirs = sorted(all_subdirs)
 
     for subdir in subdirs:
         if limit > 0 and len(articles) >= limit:

@@ -62,6 +62,12 @@ def main():
                              "Z argumentem = konkretny katalog.")
     parser.add_argument("--samples", type=int, default=15, help="Liczba sample'i w raporcie")
     parser.add_argument("--no-skip", action="store_true")
+    parser.add_argument("--random", action="store_true",
+                        help="Losowa próbka --limit URL zamiast pierwszych N. Seed zapisywany "
+                             "do <out_dir>/sample_seed.txt — przy --resume jest wczytywany "
+                             "automatycznie żeby zachować ten sam zestaw URL.")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Seed dla --random (default 42).")
     args = parser.parse_args()
 
     if args.resume:
@@ -100,6 +106,33 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {out_dir}")
 
+    # Sample seed handling — zapis przy first run, odczyt przy --resume.
+    # Bez tego losowy sample przy resume rozjedzie się i pipeline zacznie
+    # przetwarzać URL-e których nie ma w entity_layer/final.
+    seed_file = out_dir / "sample_seed.txt"
+    use_random = args.random
+    use_seed = args.seed
+    if seed_file.exists():
+        # Wcześniejszy run używał randomu — wczytaj ten sam seed
+        try:
+            saved = seed_file.read_text().strip()
+            saved_seed = int(saved)
+            if args.resume or not args.random:
+                use_random = True
+                use_seed = saved_seed
+                logger.info(f"Wczytano sample_seed.txt: --random --seed {saved_seed}")
+            elif args.random and args.seed != saved_seed:
+                logger.error(
+                    f"Konflikt seedów: zapisany={saved_seed}, podany={args.seed}. "
+                    f"Użyj --resume bez --seed, albo wystartuj nowy katalog."
+                )
+                sys.exit(2)
+        except ValueError:
+            logger.warning(f"Nieparsowalny sample_seed.txt: {seed_file}")
+    elif args.random:
+        seed_file.write_text(f"{args.seed}\n")
+        logger.info(f"Zapisano sample_seed.txt: seed={args.seed}")
+
     metrics_before = out_dir / "metrics_before.txt"
     metrics_after = out_dir / "metrics_after.txt"
     metrics_delta = out_dir / "metrics_delta.txt"
@@ -122,6 +155,8 @@ def main():
                     "--out-dir", str(out_dir)]
     if args.no_skip:
         pipeline_cmd.append("--no-skip")
+    if use_random:
+        pipeline_cmd += ["--random", "--seed", str(use_seed)]
     rc = step("Pipeline (Step 1 + Step 2)", pipeline_cmd, log_file=pipeline_log)
     if rc != 0:
         logger.error("Pipeline FAILED — see " + str(pipeline_log))

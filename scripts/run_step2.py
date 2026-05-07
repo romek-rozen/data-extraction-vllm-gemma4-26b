@@ -49,6 +49,10 @@ def main():
     parser.add_argument("--out", default=str(RESULT_DIR / "final.jsonl"))
     parser.add_argument("--websites", default=str(WEBSITES_DIR))
     parser.add_argument("--no-skip", action="store_true")
+    parser.add_argument("--random", action="store_true",
+                        help="Weź losową próbkę --limit URL (musi być spójne z run_step1).")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Seed dla --random — MUSI być ten sam co w run_step1.")
     args = parser.parse_args()
 
     client = VLLMClient(base_url=VLLM_BASE_URL, model=VLLM_MODEL)
@@ -64,7 +68,8 @@ def main():
         logger.error(f"Pusty entity layer: {args.entity_layer}. Uruchom najpierw run_step1.py")
         sys.exit(1)
 
-    articles = load_articles(args.websites, limit=args.limit)
+    articles = load_articles(args.websites, limit=args.limit,
+                             random_sample=args.random, seed=args.seed)
     todo = []
     for a in articles:
         if a["url_hash"] in existing:
