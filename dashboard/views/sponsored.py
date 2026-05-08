@@ -3,7 +3,7 @@
 Główne sekcje:
 1. Per-domain sponsored ratio — kluczowy KPI (mapa rynku publishing).
 2. Distribution sponsored vs editorial (binary).
-3. Distribution po subtype (full_sponsored / link_insertion / brand_mentions / advertorial).
+3. Distribution po subtype (paid_placement / brand_mentions / advertorial).
 4. Sponsored vs category (czy niektóre kategorie mają więcej sponsored?).
 5. Eksplorator artykułów z filtrem po sponsored=true/false + subtype + justification.
 """

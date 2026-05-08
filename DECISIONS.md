@@ -174,6 +174,116 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Alternatywy odrzucone:** `src/<package>/` z `pyproject.toml` — niepotrzebny narzut bez zysku (testy, izolacja, dystrybucja PyPI nie są w scope).
 - **Status:** final. Jeśli kiedyś dystrybuujemy jako pakiet, wtedy migracja.
 
+### D16: SPO v1 — entities + canonical names + is_central + free-form SPO triples (bootstrap discovery)
+- **Co:** Nowy pipeline `spo_v1` (two-step: classify + entities_spo). Step entities rozszerzony o:
+  (a) `name` jako forma kanoniczna (Wikidata/Wikipedia label, instrukcja w prompcie, brak osobnego pola `canonical_name`),
+  (b) `is_central` boolean (max 5 per artykuł, cap promptem + post-processingiem `_cap_central`),
+  (c) array `triples: [{s, p, o}]` z free-form predicates (1-3 słowa, lowercase, English verb phrase preferowane).
+  Subject MUST matchować `entity.name` (canonical). Object: entity.name LUB literal value.
+- **Dlaczego:** Fundament knowledge graph. **Bottom-up discovery** dla closed vocab v2 — zamiast cherry-pickować predicates z literatury (EDC/schema.org/ConceptNet), zbieramy free-form distribution na pełnej próbce ~25k URL (multi-domain: biznews.com.pl, intymnehistorie, praktycznyekspert.pl). Top-N po runie + clustering Levenshtein → kandydaci do enum v2.
+  Single LLM call (rozszerzenie entities, nie osobny step) — model widzi tekst + entities razem, spójność wymuszona kontekstem. Zero dodatkowego wall time (większy output ale jeden call).
+- **Alternatywy odrzucone:**
+  - **Closed vocab z literatury** — bias (English research papers, brak pokrycia polskiego SEO/blogowego rejestru). Decyzja po danych.
+  - **Osobny piąty step `spo`** — wymaga wysłania text+entities ponownie do modelu (+25% wall, +tokeny), ryzyko cross-step inconsistency.
+  - **Hybrid: indeksy entities w triplets** — model słabo liczy indeksy, dodatkowy boilerplate.
+  - **Post-hoc embedding canonicalizer (EDC)** — deferred (osobny krok offline po danych).
+- **Oparte na:** Smoke test 5 URL conc=4 — 0 fails, 0% triples_s_unmatched (wszystkie subjekty matchują entities), avg 12 triples/article, central entities sensowne (trufla/Polska/Puszcza Białowieska dla artykułu o truflach), canonical names trzymają język artykułu (PL: "trufla", "Podkarpackie"). Predicates mieszają PL/EN — to oczekiwany sygnał dla bootstrap (analiza pokaże skalę problemu).
+- **Pliki:** `prompts/spo_entities_v1_system.md`, `prompts/spo_schema_v1.json`, `lib/spo_pipeline_v1.py`, `scripts/run_spo_v1.py`, `scripts/spo_summary_v1.py`, `dashboard/views/spo.py`. Plan: `PLANS/spo_v1_bootstrap_plan.md`. TODO: `PLANS/spo_v1_todo.md`. Sesja: `SESSIONS_SUMMARY/2026-05-08_spo_v1_design.md`.
+- **Status:** tentative — pełen run 25k URL w tmux benchmark (conc=8) w trakcie. Decyzja o closed vocab v2 (D17) po analizie SUMMARY.md i dashboardu.
+- **Update 18:59 (po smoke)**: Smoke pokazał że "Predicates SHOULD be English" było za słabe — model defaultował do języka artykułu (PL: `rośnie w`, `preferuje`, `jest w`). Wymusiliśmy hard rule "**Predicate `p` MUST ALWAYS be in ENGLISH**" + dodatkowy przykład PL→EN (trufle: `grows in` NIE `rośnie w`) + WRONG/RIGHT note w przykładach. Subjects/objects nadal w języku artykułu (canonical entity names — to jest niezbędne dla string-match grounding). Pełen run #1 zatrzymany po ~15 min, restart #2 z poprawionym promptem (`final_results/2026-05-08_18-59-07__spo_v1_full_bootstrap_en/`). Full log redirectowany do `<out_dir>/full_stdout.log` (a nie /tmp).
+- **Update 19:19 (po multi-agent)**: Run #2 zatrzymany po obserwacji: load_articles() blokuje GPU (5-15 min sekwencyjny trafilatura). Wprowadzono D17 (streaming loader) i D18 (v2 pipe SPO jako alternatywna architektura). v1 pozostaje single-call JSON, v2 to three-step pipe. Smoke v1+streaming + v2+streaming OK (predicates EN, 0 parse_errors, 0 s_unmatched). Uruchomiono **A/B równolegle** (oba conc=4, total 8 = max-num-seqs vLLM): v1 w `tmux benchmark`, v2 w `tmux benchmark2`. Out_dirs: `final_results/<ts>__spo_v{1,2}_AB_full/`.
+
+### D17: Streaming loader z disk cache markdown (`websites_cache/`)
+- **Co:** Nowy moduł `lib/streaming_loader.py:stream_articles_async(...)` — generator yieludujący dicty zgodnie z `load_articles`, ale: (a) producer ThreadPoolExecutor (n=4) parsuje trafilatura w równoległych wątkach (gzip + trafilatura zwalniają GIL), (b) bounded queue (`maxsize=200`) ogranicza pamięć, (c) per-hash cache `<websites_cache>/<hash>.md` dla zerowego trafilatura kosztu w kolejnych runach. Versioning cache `<cache_dir>/_version.txt = "v1"`.
+- **Dlaczego:** Sekwencyjny `load_articles()` blokuje GPU przez 5-15 min na 25k URL, dla 1M URL → godziny GPU idle. Streaming wpuszcza pierwsze artykuły do queue w <1s, GPU pracuje od t=0. Cache: drugi run tych samych URL = 5.6× szybszy loader (smoke 1.91s cold → 0.34s hot, dla 1M proporcjonalnie).
+- **Alternatywy odrzucone:**
+  - **Multiprocessing zamiast ThreadPool** — niepotrzebne, gzip + trafilatura zwalniają GIL.
+  - **Lazy `os.scandir()` także dla `random_sample=True`** — niemożliwe, random wymaga pełnej listy paths dla determinizmu seedu.
+  - **Pre-process + commit cache do repo** — websites/ zewnętrzny dataset, pipeline ma robić cache w runtime.
+  - **Compress cache (.md.gz)** — premature optimization. Decyzja po pomiarze GB na 1M.
+- **Oparte na:** Smoke `scripts/test_streaming_loader.py` (20 URL): cold 1.91s, hot 0.34s, 100% identyczny tekst. Integrate test w `run_spo_v1.py` + `run_spo_v2.py` z flagami `--no-streaming`, `--loader-workers`, `--cache-dir`. Default streaming ON.
+- **Pliki:** `lib/streaming_loader.py`, `scripts/test_streaming_loader.py`, `PLANS/streaming_loader_plan.md`. Backward compat: `lib/data_loader.load_articles()` nietknięty.
+- **Status:** final dla scale 25k–1M. Re-evaluate przy 10M+.
+
+### D18: v2 SPO pipeline — three-step (entities_only + spo_pipe), pipe format dla SPO
+- **Co:** Alternatywna architektura v2: rozbicie single-call JSON (v1) na trzy stepy:
+  (1) `classify` (jak w v1, reuse `process_classify_v2`),
+  (2) `entities_only` — JSON, tylko `{name, type, is_central}` (bez triples),
+  (3) `spo_pipe` — non-JSON, raw text format `subject|predicate|object\n` per linia. Predicates **HARD RULE** ENGLISH only.
+- **Dlaczego:**
+  - Output tokens: pipe ~13 tok/triple vs JSON ~50+ tok/triple (zmierzone na smoke). 60-70% redukcja.
+  - Każdy step ma osobny budget tokenów — single-call v1 czasem łapał `MAX_TOKENS_STEP1=4000` przy 60 ent + 40 trip dla długich artykułów.
+  - Prompty bardziej focused (entities prompt nie tłumaczy SPO rules → krótszy → tańszy prefix cache).
+  - Smoke wynik: v2 wall 18.2s vs v1 26.2s (5 URL conc=4) — **~44% szybszy** mimo +1 step, dzięki krótszemu output. Plus więcej triples (49 vs 32) — model ma więcej miejsca w spo step.
+- **Alternatywy odrzucone:**
+  - **Indeksy entities w schemie JSON** (`subject_idx: int`) — model słabo liczy indeksy.
+  - **Closed enum predicates** w pipe — premature, robimy bottom-up discovery na pełnej próbce. Po analizie top-N predicates → ewentualnie v3 z closed vocab.
+  - **Single-step JSON dla SPO ale bez entities** — tracimy grounding (entity name match).
+- **Oparte na:** Smoke `scripts/run_spo_v2.py --limit 5 --concurrency 4`: 0 parse_errors, 0 s_unmatched, 100% predicates EN, finish_reason=stop dla wszystkich (brak truncate). vLLM raw POST z guided_choice/text-mode (bez xgrammar — pipe format walidowany przez parser w post-processing).
+- **Pliki:** `prompts/spo_entities_only_v2_system.md`, `prompts/spo_entities_only_v2_schema.json`, `prompts/spo_pipe_v2_system.md`, `lib/spo_pipeline_v2.py`, `scripts/run_spo_v2.py`, `PLANS/spo_v2_pipe_plan.md`.
+- **A/B vs v1**: Uruchomiono równolegle 19:19 (oba conc=4 = total 8 = max vLLM). Decyzja final v1 vs v2 vs hybrid po pełnym runie z metrykami: wall, throughput, parse error rate, predicate distribution overlap, central entity precision, % EN predicates.
+- **Status:** A/B running. Decyzja D20 po wynikach.
+
+### D19: v3 classifier — pre-filter URL regex + wzmocniony prompt OVERRIDE signals
+- **Co:** Dwustopniowy fix recall na junk listing pages:
+  (1) **Deterministyczny pre-classifier** w `lib/junk_pre_filter.py:is_definite_url_junk(url, path, query)`. Regex match na 100% pewnych patternach junk: `/tag/`, `/tags/`, `/tagi/`, `/author/`, `/autor/`, `/archive[s]?/`, `/archiwum/`, `/search/`, `/szukaj/`, `?s=...`, `?paged=N`, `?start=N`, `/topic/`, `/temat/`, `/label/`, `/etykieta/`. Match → skip LLM, zapisz stub z `ml_skipped=True, junk_reason=<reason>`. Oszczędza ~0.2-0.6s/URL na takich, +deterministycznie nie myli.
+  (2) **`prompts/step_junkclassify_v3_system.md`** — sekcja `OVERRIDE URL signals` zastępuje wcześniejszy `Strong URL signals`. Reguła: tag/category/author/page/search URL → JUNK regardless of content (chyba że tail ma 200+ chars prose description tematu). Krytyczny: `/tag/` z 1-2 wpisami pozostaje JUNK (rule 3+ snippets NIE applies tutaj). Dwa nowe przykłady: K (tag z 1 wpisem) + L (single-entry author archive).
+- **Dlaczego:** v2 classifier prompt miał recall 73% na tag pages (22/81 false negatives na pomocedlaseniora.pl). Tag pages to dominująca klasa junku w niektórych domenach (62/80 = 78% pomocedlaseniora). Pre-filter łapie tag/author/search deterministycznie (bez LLM cost), prompt v3 łapie pozostałe URL-pattern junki (np. `/category/X/` które mogą mieć description) gdzie pre-filter jest za agresywny.
+- **Alternatywy odrzucone:**
+  - **Pre-filter dla `/category/`** — false positives na e-commerce description pages.
+  - **Pre-filter dla `/page/N/`** — niejednoznaczne (może być paginacja artykułu).
+  - **Tylko prompt update bez pre-filtra** — wciąż trace miss na edge cases, plus marnujemy LLM na deterministyczne junky.
+  - **Globalny ban listy URL patterns w preprocessing** — to robi pre-filter. Tylko zmiana lokalizacji.
+- **Oparte na:** Analiza 1516 v1 + 1817 v2 records z aborted run 19:19 — 22 tag false negatives w v1, 27 w v2. Smoke v3 (5 URL conc=2): działa, pre-filter łapie 0/2 junków bo seed=42 nie miał tag pages. Smoke v3+lw2 (30 URL random seed=999): 2 junk z 30, 28 entities_spo OK, 0 fails.
+- **Pliki:** `lib/junk_pre_filter.py`, `prompts/step_junkclassify_v3_system.md`, integracja w `scripts/run_spo_v1.py` + `scripts/run_spo_v2.py` (load v3 prompt + pre-filter check przed q_classify put).
+- **Status:** A/B running na pełnych 25k URL (v1 + v2 oba z v3 classifier).
+
+---
+
+### D20: Sponsored v2 — zlanie `full_sponsored` + `link_insertion` w `paid_placement`
+- **Co:** Nowy prompt `prompts/step_sponsored_v2_system.md` + schema `prompts/schema_sponsored_v2.json`. Enum subtypes: `[null, paid_placement, brand_mentions, advertorial]` (było: `[null, full_sponsored, link_insertion, brand_mentions, advertorial]`). Decision tree: disclaimer → `advertorial`; external link(s) z promo context (krótka wstawka lub cały artykuł) → `paid_placement`; brak linków + ≥2 wzmianki → `brand_mentions`. `scripts/run_fourstep_v1.py` przełączony na v2.
+- **Dlaczego:** Pomiar na 500-URL run (`final_results/2026-05-08_17-32-56__fourstep_v1_v2_1_500_seed123`): z 267 sponsored 159 (59.5%) klasyfikowane jako `link_insertion`, 101 (37.8%) `full_sponsored`. Inspekcja justifikacji ujawniła że wiele `link_insertion` to faktycznie `full_sponsored` (cały artykuł poświęcony promocji marki, np. `biznews.com.pl/.../artykuly-biurowe-gdansk-gdynia` z czterema wzmiankami flowoffice.pl + CTA). Prompt v1 mówił `link_insertion = "possibly seamlessly (semantic-fitting paragraph)"` — każdy artykuł z linkiem zewn. + krótką notką wokół niego trafiał do `link_insertion`.
+- **Alternatywy odrzucone:**
+  - **Topic-match test** (artykuł o niszy = full_sponsored, niedopasowany = link_insertion). W realnym rynku PL link insertion jest **właśnie** sprzedawany jako tematycznie dopasowany (wydawcy oferują 3-8 zdań notki kontekstowej wokół linku). Topic match nie jest discriminatorem.
+  - **Aggressive thresholds full_sponsored** (≥5 mentions LUB ≥50% artykułu o marce). Generuje błędy w drugą stronę bez rzetelnej granicy.
+  - **Trzeci subtype `promotional_article`** dla strefy granicznej. Dodaje kolejną fuzzy granicę.
+- **Oparte na:** 500-URL run analiza confusion w `sponsored.jsonl`; feedback użytkownika o realiach rynku PL link building (link insertion zawsze tematycznie dopasowany + krótka notka, granica z artykułem sponsorowanym fuzzy z definicji).
+- **Status:** do walidacji — następny run (te same 500 URL, seed=123) na v2 → porównanie z v1.
+
+---
+
+### D21: Drain-first worker priority + bounded `q_classify` (SPO v1/v2)
+- **Co:** Worker w `scripts/run_spo_v1.py` + `scripts/run_spo_v2.py` priorytetuje **późniejsze etapy pipeline'u**:
+  - v1: `q_entities (get_nowait)` > `q_classify (get timeout=0.1)`.
+  - v2: `q_spo (get_nowait)` > `q_entities (get_nowait)` > `q_classify (get timeout=0.1)`.
+  - Dodatkowo `q_classify = queue.Queue(maxsize=concurrency*8)` — bounded, żeby producer streaming loadera throttlował się gdy workery nie nadążają.
+- **Dlaczego:** Run 19:47 z poprzednim priorytetem (`classify > entities > spo`) — po 17 minutach `spo_pipe.log` był pusty (0 B), `classified.jsonl` 6.1 MB rosło, `entities.jsonl` zamarł na 54 KB o 19:50. Worker starvation: producer zalewał `q_classify` szybciej niż 4 workery konsumowały, `get_nowait()` na classify zawsze trafiał, etapy entities/spo nigdy nie dostawały slotu. Spo_pipe miał czekać aż producer skończy 21M URL i `q_classify` się opróżni.
+- **Konsekwencje:**
+  - **GPU saturation:** vLLM zawsze ma 4 inflight requesty — gdy `q_spo`/`q_entities` puste, worker fallbackuje na classify (nowy materiał). Etap nie ma znaczenia dla throughputu (token to token na tym samym serwerze).
+  - **Memory:** szybszy drain `state[url_hash]` (drop po `try_finalize` dla każdego artykułu), peak RAM stabilniejszy.
+  - **Pipeline visibility:** spo_pipe.log/entities_only.log nabijają linie od pierwszych sekund runa, nie po skończeniu wszystkich classify.
+- **Alternatywy odrzucone:**
+  - Tylko bounded queue bez zmiany priorytetu — rozwiązuje RAM, nie rozwiązuje starvation (workery nadal najpierw obsługują classify gdy queue jest pełna).
+  - Tylko zmiana priorytetu bez bounded — przy 21M URL `q_classify` rośnie unbounded (każdy artykuł = dict z markdown text, peak GB+).
+- **Oparte na:** Diagnoza runa `final_results/2026-05-08_19-47-43__spo_v{1,2}_AB_v3` — `spo_pipe.log = 0 B` po 17 min, ratio classified.jsonl / entities.jsonl = 6.1 MB / 54 KB.
+- **Status:** zaimplementowane, A/B running pełna próbka v1 + v2 z tagiem `full_drainfix`.
+
+---
+
+### D22: SPO v2 entity context — `name [type, central]` zamiast samych `name`
+- **Co:** `lib/spo_pipeline_v2.py:process_spo_pipe_v2` formatuje encje jako bullet list z tagami: `* {name} [{type}, central]` dla `is_central=True` lub `* {name} [{type}]` dla pozostałych. Central first. System prompt `prompts/spo_pipe_v2_system.md` rozszerzony o sekcję `## ENTITY METADATA — how to use the tags` (priors: `central` → preferowany jako `s`, type → role priors Org/Person → subject vs Number/Currency/Temperature → object, type → predicate priors Temperature → `cooked at`, Currency → `costs`, Date → `released in`).
+- **Dlaczego:** Po enrich każda encja ma 4 deterministyczne pola (`type`, `category`, `strength`, `is_central`) — przed zmianą do user prompta szła tylko `name`. `is_central` (max 5 głównych bohaterów artykułu) to mocny sygnał priorytetyzacji subject; `type` (51 Azure NER) różnicuje role w triplecie (Quantity zwykle = object, Person/Org zwykle = subject) i pozwala dobrać faithful predicate.
+- **Konsekwencje:**
+  - **Koszt tokenów:** ~+150 tok per article (5 tok per encja × ~30 encji średnio). Akceptowalne — sygnał > koszt.
+  - **Pominięte:** `category` (deterministyczna agregacja typów do 11 grup — duplikat sygnału `type`), `strength` (skorelowany z typem: Person/Org=strong, Number/Quantity=weak — duplikat).
+  - **Sortowanie central-first:** model widzi `[central]` na górze listy, naturalnie priorytetuje je.
+- **Alternatywy odrzucone:**
+  - Pełny dump enriched encji jako JSON w prompcie — generuje noise, łamie pipe-only output (model może chcieć echo'ować JSON).
+  - Tylko `is_central` bez `type` — traci ważny sygnał role (Quantity vs Product).
+  - Wszystkie 4 pola — `category`+`strength` to ~200 dodatkowych tok/article × 21M URL bez proporcjonalnego zysku.
+- **Oparte na:** Inspekcja `lib/pipeline.py:enrich_entity` — schema v6 dodaje `type, category, strength` deterministycznie; CLAUDE.md mapping `TYPE_TO_CATEGORY`. User feedback: "tyle danych o encjach i nie przekazujemy".
+- **Status:** zaimplementowane w `lib/spo_pipeline_v2.py` + `prompts/spo_pipe_v2_system.md`, A/B running na pełnej próbce z tagiem `full_drainfix` (porównanie quality vs poprzedni run 19:47 na nazwy-only).
+
 ---
 
 ## Format dla nowych decyzji

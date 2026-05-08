@@ -2,6 +2,64 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-08 (późny wieczór) — SPO pipeline fix: drain-first scheduling + rich entity context
+
+**Worker starvation fix (v1 + v2):**
+- Diagnoza run 19:47: `spo_pipe.log = 0 B` po 17 min, classified.jsonl 6.1 MB rosło, entities.jsonl zamarł na 54 KB. Worker priority `classify > entities > spo` + producer zalewający unbounded `q_classify` → late stages głodzone.
+- **Fix:** odwrócony priorytet — drain-first (`spo > entities > classify` w v2; `entities > classify` w v1). Classify z `timeout=0.1` jako fallback gdy późniejsze etapy puste. `q_classify = queue.Queue(maxsize=concurrency*8)` bounded — producer throttluje się na put().
+- Efekt: GPU saturation utrzymywana (4 inflight cały czas), peak RAM `state[]` mniejszy (artykuły szybciej finalizowane), spo_pipe.log nabija linie od pierwszych sekund.
+- Pliki: `scripts/run_spo_v1.py`, `scripts/run_spo_v2.py`. Decyzja: D21.
+
+**Rich entity context dla spo_pipe_v2:**
+- Po enrich każda encja ma `{name, type, category, strength, is_central}` ale do `process_spo_pipe_v2` szła tylko `name`. Strata sygnału: `is_central` (max 5 głównych bohaterów), `type` (51 Azure NER → role + predicate priors).
+- **Format:** `* name [type, central]` (bullet list, central first) zamiast `name1, name2, ...`. System prompt rozszerzony o sekcję `## ENTITY METADATA — how to use the tags` z role priors (Org/Person → subject, Number/Currency/Temperature → object) i predicate priors (Temperature → `cooked at`, Currency → `costs`).
+- Pominięte (duplikat sygnału): `category` (deterministyczna agregacja typów), `strength` (skorelowany z typem). Koszt: ~+150 tok/article.
+- Pliki: `lib/spo_pipeline_v2.py:process_spo_pipe_v2`, `prompts/spo_pipe_v2_system.md`. Decyzja: D22.
+
+**A/B run:** v1 + v2 równolegle, `--limit 0` (cała próbka), tag `full_drainfix`, w tmux sessions `spo_v1`/`spo_v2`.
+
+---
+
+## 2026-05-08 (wieczór) — SPO pipelines (v1 + v2) + streaming loader + v3 classifier
+
+**Pipeline'y SPO (Subject-Predicate-Object) — fundament knowledge graph:**
+- **`scripts/run_spo_v1.py`** + **`lib/spo_pipeline_v1.py`** — two-step (classify + entities_spo). Single-call JSON: w jednym wywołaniu LLM zwraca `entities` (kanoniczne nazwy + `is_central` boolean, max 5 per artykuł) + `triples` (s, p, o). Free-form predicates dla bootstrap discovery (closed vocab v2 dopiero z danych).
+- **`scripts/run_spo_v2.py`** + **`lib/spo_pipeline_v2.py`** — three-step (classify + entities_only + spo_pipe). Pipe format dla SPO (`subject|predicate|object\n` per linia, raw text, parser tolerantny). **Hard rule predicate MUST be ENGLISH** dla wszystkich języków artykułu. Smoke: ~60% mniej output tokenów vs JSON, 31% szybszy wall vs v1.
+- **Prompty:** `prompts/spo_entities_v1_system.md` (v1, canonical+central+SPO+3 examples), `prompts/spo_entities_only_v2_system.md` + `prompts/spo_pipe_v2_system.md` (v2, split). Schemy: `prompts/spo_schema_v1.json`, `prompts/spo_entities_only_v2_schema.json`.
+- **Auto-summary** `scripts/spo_summary_v1.py` (top-100 predicates, top-50 central entities, type×is_central, domain stats, 30 sample triples, predicate clustering hint).
+- **Dashboard view** `dashboard/views/spo.py` (karta `🕸️ SPO / Knowledge Graph`).
+
+**Streaming loader z disk cache (`websites_cache/`):**
+- **`lib/streaming_loader.py`** — `stream_articles_async()`, generator yielding articles po jednym, producer ThreadPool (default n=2 workerów, override `--loader-workers`), bounded queue maxsize=200. Cache `websites_cache/<hash>.json` w formacie `{"domain":"...","url":"...","content":"<markdown>"}`. Versioning w `_version.txt` (obecna v4). Smoke: 5.6× speedup z cache (1.91s cold → 0.34s hot na 20 URL).
+- Integracja w `run_spo_v1.py` + `run_spo_v2.py` z flagami `--no-streaming`, `--loader-workers`, `--cache-dir`. Default streaming ON. **Pierwsze artykuły do GPU w <1s** vs 5-15min idle z sekwencyjnym `load_articles()`.
+- Plan: `PLANS/streaming_loader_plan.md`.
+
+**v3 classifier (recall na listing pages):**
+- **`lib/junk_pre_filter.py`** — deterministyczny regex pre-classifier. Match `/tag/`, `/author/`, `/archive/`, `/search/`, `?s=...`, `?paged=N`, `?start=N` → skip LLM, zapisz stub z `ml_skipped=True, junk_reason=<label>`. Oszczędza tokeny + 0.2-0.6s/URL na każdym matchu.
+- **`prompts/step_junkclassify_v3_system.md`** — sekcja "OVERRIDE URL signals" zastępuje "Strong URL signals". Reguła: tag/category/author URL → JUNK regardless of content. Krytyczny: `/tag/` z 1-2 wpisami pozostaje JUNK (override "3+ snippets" rule). Dwa nowe przykłady: K (single-entry tag), L (single-entry author archive).
+- v2 classifier miał 73% recall na tag pages (22/81 false negatives na pomocedlaseniora.pl) — v3 fix u źródła (pre-filter) i w prompcie.
+
+**Output schema (kompatybilność z dashboard + analizą):**
+- Każdy run produkuje 4+ pliki JSONL: **`classified.jsonl`** (junk/non-junk + URL signals), **`entities.jsonl`** (encje canonical z `is_central`), **`spo.jsonl`** (triplety s/p/o), **`final.jsonl`** (joined record). Plus legacy `entities_spo.jsonl` w v1 dla resume.
+- **`spo_raw.txt`** — surowy pipeline output (autentyczny w v2, reconstructed z JSON w v1) — same triplety bez headerów, do wglądu w format wyjścia LLM.
+- `run_meta.json` z metadanymi runa: pipeline, classifier_prompt, use_streaming, loader_stats, n_pre_filter_junk, counters.
+- `SUMMARY.md` (auto-generated po runie).
+
+**Decyzje (DECISIONS.md):**
+- D16: SPO + canonical + central + free-form predicate bootstrap
+- D17: streaming loader z disk cache markdown
+- D18: v2 SPO pipe pipeline (alternatywna architektura)
+- D19: v3 classifier — pre-filter URL regex + OVERRIDE prompt signals
+
+**Plany (PLANS/):**
+- `PLANS/spo_v1_bootstrap_plan.md` — design+motywacja v1
+- `PLANS/spo_v1_todo.md` — phased checklist
+- `PLANS/spo_v2_pipe_plan.md` — design v2
+- `PLANS/streaming_loader_plan.md` — streaming + cache design
+- `SESSIONS_SUMMARY/2026-05-08_spo_v1_design.md` — log sesji projektowej
+
+**A/B running** — `final_results/2026-05-08_19-47-43__spo_v{1,2}_AB_v3/` na pełnych 25667 URL, conc=4 each (total 8 = max vLLM `--max-num-seqs`). Decyzja v1 vs v2 vs hybrid (D20) po wynikach z metrykami: wall, throughput, parse error rate, predicate distribution, central entity precision.
+
 ## 2026-05-08 — Three-step → Four-step + sponsored detection + scrapery
 
 **Pipeline:**

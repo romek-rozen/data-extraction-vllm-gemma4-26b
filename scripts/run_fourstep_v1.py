@@ -124,8 +124,8 @@ def main():
     schema_meta = load_schema("schema_meta_v2")
     sys_ent = load_system_prompt("step_entities_v2_system")
     schema_ent = load_schema("schema_entities_v2")
-    sys_spon = load_system_prompt("step_sponsored_v1_system")
-    schema_spon = load_schema("schema_sponsored_v1")
+    sys_spon = load_system_prompt("step_sponsored_v2_system")
+    schema_spon = load_schema("schema_sponsored_v2")
 
     articles = load_articles(args.websites, limit=args.limit, random_sample=args.random, seed=args.seed)
     todo = [a for a in articles if a["url_hash"] not in done_final]

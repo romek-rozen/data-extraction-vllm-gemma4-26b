@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "properties": {
+    "entities": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "maxLength": 100},
+          "type": {
+            "type": "string",
+            "enum": [
+              "Address", "Age", "Airport", "Area", "City", "ComputingProduct",
+              "Continent", "CountryRegion", "CulturalEvent", "Currency",
+              "Date", "DateRange", "DateTime", "DateTimeRange", "Dimension",
+              "Duration", "Email", "Event", "Geographical", "GPE", "Height",
+              "Information", "IpAddress", "Length", "Location", "NaturalEvent",
+              "Number", "NumberRange", "Ordinal", "Organization",
+              "OrganizationMedical", "OrganizationSports",
+              "OrganizationStockExchange", "Percentage", "Person", "PersonType",
+              "PhoneNumber", "Product", "SetTemporal", "Skill", "Speed",
+              "SportsEvent", "State", "Structural", "Temperature", "Temporal",
+              "Time", "TimeRange", "URL", "Volume", "Weight"
+            ]
+          },
+          "is_central": {"type": "boolean"}
+        },
+        "required": ["name", "type", "is_central"]
+      }
+    }
+  },
+  "required": ["entities"]
+}

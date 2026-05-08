@@ -63,7 +63,7 @@ docker run -d --gpus all --ipc=host \
   --kv-cache-dtype fp8 \
   --max-model-len 32768 \
   --max-num-seqs 8 \
-  --gpu-memory-utilization 0.85 \
+  --gpu-memory-utilization 0.75 \
   --moe-backend marlin \
   --enable-prefix-caching \
   --default-chat-template-kwargs '{"enable_thinking": false}'

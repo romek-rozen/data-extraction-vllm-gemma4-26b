@@ -20,6 +20,7 @@ from dashboard.components.filters import render_filters  # noqa: E402
 from dashboard.views import (  # noqa: E402
     run_summary, articles, entities, categories,
     compare_runs, compare_onestep, analytics, drift, logs, sponsored, junk_analysis,
+    spo,
 )
 
 PAGES = {
@@ -29,6 +30,7 @@ PAGES = {
     "categories": ("Kategorie artykułów", categories),
     "junk-analysis": ("🗑️ Junk Analysis", junk_analysis),
     "sponsored": ("🎯 Sponsored Detection", sponsored),
+    "spo": ("🕸️ SPO / Knowledge Graph", spo),
     "compare_runs": ("Porównanie runów", compare_runs),
     "compare_onestep": ("One-step vs Two-step", compare_onestep),
     "analytics": ("📈 Analiza jakości", analytics),

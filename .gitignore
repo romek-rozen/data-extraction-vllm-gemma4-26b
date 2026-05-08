@@ -2,6 +2,7 @@
 websites/
 websites_*/
 websites_new/
+websites_cache/*
 
 # Wyniki eksperymentów (lokalne)
 result/

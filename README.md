@@ -211,6 +211,78 @@ Wyniki w `final_results/<ts>__<tag>/`:
 
 Estymowany czas dla 155 URL: ~10-15 min @ concurrency 8 na DGX Spark.
 
+## SPO pipelines (knowledge graph foundation)
+
+Pipeline'y do ekstrakcji **encji canonical** (z flagą `is_central`) + **trójek SPO** (Subject-Predicate-Object) — fundament knowledge graph. Dwa warianty arquitekturyczne (A/B porównanie):
+
+| Wariant | Skrypt | Architektura |
+|---|---|---|
+| **v1** | `scripts/run_spo_v1.py` | two-step: classify + entities_spo (single-call JSON, encje + triples razem, xgrammar) |
+| **v2** | `scripts/run_spo_v2.py` | three-step: classify + entities_only (JSON) + spo_pipe (raw text `s\|p\|o`, ~60% mniej tokenów) |
+
+Oba używają tego samego **v3 classifiera** (`prompts/step_junkclassify_v3_system.md`) z **deterministycznym pre-filtrem URL** (`lib/junk_pre_filter.py` — łapie `/tag/`, `/author/`, `/archive/`, `/search/`, `?paged=` bez wywołania LLM, oszczędza tokeny + 0.2-0.6s/URL).
+
+Output (każdy run produkuje wszystkie):
+- `classified.jsonl` — junk/non-junk + URL signals + ml_skipped flag
+- `entities.jsonl` — encje canonical (`{name, type, category, strength, is_central}`)
+- `spo.jsonl` — triplety `{s, p, o}`
+- `final.jsonl` — joined record (entities + triples)
+- `spo_raw.txt` — surowy pipe output LLM (v2) lub reconstructed z JSON (v1) — same triplety bez headerów
+- `SUMMARY.md` — auto-generated (top predicates, central entities, type stats, sample triples)
+- `run_meta.json` — metadane runa
+
+Predicates **MUSZĄ być w angielskim** dla wszystkich języków artykułów (cross-language graph aggregation). Encje i objekty zachowują język artykułu w canonical formie (`trufla` PL, `OpenAI` EN).
+
+### Streaming loader z disk cache
+
+Sekwencyjny `lib/data_loader.load_articles()` blokuje GPU przez 5-15 min na 25k URL (trafilatura na każdym HTML). Streaming wariant w `lib/streaming_loader.py:stream_articles_async()`:
+- Producer ThreadPool (default n=2) parsuje równolegle
+- Bounded queue maxsize=200 — memory-bounded
+- Per-hash cache `websites_cache/<hash>.json` w formacie `{"domain":"...","url":"...","content":"<markdown>"}` — drugi run czyta z dysku, **5-6× szybszy loader**
+- Pierwsze artykuły do GPU w <1s zamiast po pełnym preprocessingu
+
+Włączony domyślnie. Wyłączenie: `--no-streaming`. Override workerów: `--loader-workers N` (domyślnie 2 — wyższe ryzykują heap corruption w lxml 6.x). Override cache: `--cache-dir PATH`.
+
+### Komendy
+
+```bash
+# Smoke test — 5 URL conc=2
+python3 scripts/run_spo_v1.py --limit 5 --concurrency 2 --tag smoke
+python3 scripts/run_spo_v2.py --limit 5 --concurrency 2 --tag smoke
+
+# Pełen run — wszystkie URL z websites/, conc=4 (konkurencja A/B)
+python3 scripts/run_spo_v1.py --limit 0 --concurrency 4 --tag prod
+python3 scripts/run_spo_v2.py --limit 0 --concurrency 4 --tag prod
+
+# A/B równolegle (oba na conc=4 = 8 total = max vLLM --max-num-seqs)
+tmux new-session -d -s benchmark
+tmux new-session -d -s benchmark2
+tmux send-keys -t benchmark "python3 -u scripts/run_spo_v1.py --limit 0 --concurrency 4 --tag AB" Enter
+tmux send-keys -t benchmark2 "python3 -u scripts/run_spo_v2.py --limit 0 --concurrency 4 --tag AB" Enter
+
+# Random sample 100 URL z innym seedem
+python3 scripts/run_spo_v1.py --limit 100 --random --seed 999 --tag rnd_100
+
+# Resume po przerwaniu (idempotency po url_hash w final.jsonl)
+python3 scripts/run_spo_v1.py --resume final_results/<ts>__spo_v1_<tag>
+
+# Auto-summary (wywoływany automatycznie po runie)
+python3 scripts/spo_summary_v1.py --out-dir final_results/<run-name>
+
+# Dashboard z kartą 🕸️ SPO / Knowledge Graph
+streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501
+```
+
+Dokumentacja:
+- `PLANS/spo_v1_bootstrap_plan.md` — design + motywacja v1
+- `PLANS/spo_v2_pipe_plan.md` — design v2 (pipe format)
+- `PLANS/streaming_loader_plan.md` — streaming + cache design
+- `PLANS/spo_v1_todo.md` — phased checklist
+- `SESSIONS_SUMMARY/2026-05-08_spo_v1_design.md` — log sesji
+- `DECISIONS.md` D16-D19
+
+---
+
 ## Three-step / Four-step (D7c — junk-skip + parallel meta‖entities + sponsored detection)
 
 Pipeline z **junk-skipem** (binary classifier `0/1` przed Step 1+2 dla 11.4% śmieciowych URL) i **równoległym** Step meta + entities. Cztery wersje zaimplementowane:
