@@ -3,7 +3,6 @@
   "properties": {
     "entities": {
       "type": "array",
-      "maxItems": 60,
       "items": {
         "type": "object",
         "properties": {
@@ -31,7 +30,6 @@
     },
     "triples": {
       "type": "array",
-      "maxItems": 40,
       "items": {
         "type": "object",
         "properties": {
