@@ -44,16 +44,20 @@ from lib.config import (  # noqa: E402
 from lib.data_loader import load_articles  # noqa: E402
 from lib.streaming_loader import stream_articles_async  # noqa: E402
 from lib.junk_pre_filter import is_definite_url_junk, build_junk_stub  # noqa: E402
+from lib.pipeline_fourstep_v1 import process_meta_v2, process_sponsored_v1  # noqa: E402
 from lib.prompt_loader import load_schema, load_system_prompt  # noqa: E402
 from lib.reporter import JsonlReporter  # noqa: E402
-from lib.spo_pipeline_v2 import (  # noqa: E402
-    join_final_spo_v2,
+from lib.spo_pipeline_v3 import (  # noqa: E402
+    join_final_v3 as join_final_spo_v2,
     make_junk_stub_final_spo,
     process_classify_v2,
     process_entities_only_v2,
-    process_spo_pipe_v2,
+    process_spo_pipe_v3 as process_spo_pipe_v2,
 )
 from lib.vllm_client import VLLMClient  # noqa: E402
+
+# Lazy import: MAX_TOKENS_STEP2 + SAMPLING_STEP2 z lib.config (dla meta).
+from lib.config import MAX_TOKENS_STEP2, SAMPLING_STEP2  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("spo_v2")
@@ -62,7 +66,14 @@ logger = logging.getLogger("spo_v2")
 # - entities_only: bez triples → wystarczy ~2500 tok (60 ent × ~30 tok = 1800 + bufor)
 # - spo_pipe: 40 linii × ~30 tok = 1200, bufor → 2000
 MAX_TOKENS_ENTITIES_ONLY = 2500
-MAX_TOKENS_SPO_PIPE = 2000
+MAX_TOKENS_SPO_PIPE = 2000  # legacy pipe budget (kept for run_meta backwards compat)
+# v3 rich-JSON SPO budget (40 triples × ~100 tok + central_entities + primary_topic +
+# envelope ≈ 4200). Bumped from 2000 because rich JSON is verbose by design.
+MAX_TOKENS_SPO_PIPE_V3 = 4200
+
+# Sponsored: niska temp (deterministyczna klasyfikacja) — patrz fourstep_v1.
+SAMPLING_SPONSORED = {"temperature": 0.4, "top_p": 0.9, "top_k": 50, "repetition_penalty": 1.0}
+MAX_TOKENS_SPONSORED = 256
 
 
 def _make_phase_logger(name: str, log_path: Path) -> logging.Logger:
@@ -129,30 +140,48 @@ def main():
     _stdout_file = open(out_dir / "stdout.log", "a", encoding="utf-8", buffering=1)
     sys.stdout = _Tee(sys.__stdout__, _stdout_file)
     sys.stderr = _Tee(sys.__stderr__, _stdout_file)
+    # Python logging trzyma referencję do oryginalnego stderr z basicConfig — Tee nie zadziała
+    # dla logger.*. Dorzucamy FileHandler do root loggera, łapie wszystkie logger.info/.warning
+    # ze wszystkich modułów (lib, scripts).
+    _root_fh = logging.FileHandler(out_dir / "stdout.log", mode="a", encoding="utf-8")
+    _root_fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logging.getLogger().addHandler(_root_fh)
     logger.info(f"out_dir = {out_dir}")
 
     log_classify = _make_phase_logger("classify", out_dir / "classify.log")
     log_entities = _make_phase_logger("entities_only", out_dir / "entities_only.log")
     log_spo = _make_phase_logger("spo_pipe", out_dir / "spo_pipe.log")
+    log_meta = _make_phase_logger("meta", out_dir / "meta.log")
+    log_sponsored = _make_phase_logger("sponsored", out_dir / "sponsored.log")
     log_run = _make_phase_logger("run", out_dir / "run.log")
     log_run.info(f"START out_dir={out_dir} concurrency={args.concurrency} websites={args.websites}")
 
     rep_classify = JsonlReporter(out_dir / "classified.jsonl")
     rep_entities = JsonlReporter(out_dir / "entities.jsonl")
     rep_spo = JsonlReporter(out_dir / "spo.jsonl")
+    rep_meta = JsonlReporter(out_dir / "meta.jsonl")
+    rep_sponsored = JsonlReporter(out_dir / "sponsored.jsonl")
     rep_final = JsonlReporter(out_dir / "final.jsonl")
     spo_raw_path = out_dir / "spo_raw.txt"
     spo_raw_lock = threading.Lock()
     done_classify = rep_classify.load_existing_hashes()
     done_entities = rep_entities.load_existing_hashes()
     done_spo = rep_spo.load_existing_hashes()
+    done_meta = rep_meta.load_existing_hashes()
+    done_sponsored = rep_sponsored.load_existing_hashes()
     done_final = rep_final.load_existing_hashes()
 
     client = VLLMClient(base_url=VLLM_BASE_URL, model=VLLM_MODEL)
     sys_classify = load_system_prompt("step_junkclassify_v3_system")
     sys_entities = load_system_prompt("spo_entities_only_v2_system")
     schema_entities = load_schema("spo_entities_only_v2_schema")
-    sys_spo = load_system_prompt("spo_pipe_v2_system")
+    # v3 rich-JSON: spo_pipe_v3 emits structured triples (no more pipe parse errors).
+    sys_spo = load_system_prompt("spo_pipe_v3_system")
+    schema_spo = load_schema("spo_pipe_v3_schema")
+    sys_meta = load_system_prompt("step_meta_v2_system")
+    schema_meta = load_schema("schema_meta_v2")
+    sys_spon = load_system_prompt("step_sponsored_v2_system")
+    schema_spon = load_schema("schema_sponsored_v2")
 
     # Random sample seed → zapisz/wczytaj
     seed_path = out_dir / "sample_seed.txt"
@@ -210,6 +239,9 @@ def main():
         "classify_ok": 0, "classify_fail": 0, "junk": 0,
         "entities_ok": 0, "entities_fail": 0,
         "spo_ok": 0, "spo_fail": 0,
+        "meta_ok": 0, "meta_fail": 0,
+        "sponsored_ok": 0, "sponsored_fail": 0,
+        "sponsored_true": 0,
         "final_ok": 0, "final_fail": 0,
         "pending": 0,
         "triples_total": 0,
@@ -233,10 +265,12 @@ def main():
                                 "ok": ok, "attempts": attempts})
 
     # q_classify bounded — producer blokuje na put() gdy workery nie nadążają (RAM stabilny przy 21M URL).
-    # q_entities/q_spo unbounded — zasilane fan-outem z workerów, nie producera.
+    # q_entities/q_spo/q_meta/q_sponsored unbounded — zasilane fan-outem z workerów, nie producera.
     q_classify: queue.Queue = queue.Queue(maxsize=args.concurrency * 8)
     q_entities: queue.Queue = queue.Queue()
     q_spo: queue.Queue = queue.Queue()
+    q_meta: queue.Queue = queue.Queue()
+    q_sponsored: queue.Queue = queue.Queue()
     producer_done = threading.Event()
     shutdown = threading.Event()
 
@@ -247,18 +281,24 @@ def main():
                 return
             if "article" not in s or "classify" not in s:
                 return
-            if "entities_only" not in s or "spo_pipe" not in s:
+            # 4 etapy LLM: entities_only + spo_pipe + meta + sponsored.
+            if ("entities_only" not in s or "spo_pipe" not in s
+                    or "meta" not in s or "sponsored" not in s):
                 return
             article = s["article"]
             classify_rec = s["classify"]
             ent_rec = s["entities_only"]
             spo_rec = s["spo_pipe"]
+            meta_rec = s["meta"]
+            spon_rec = s["sponsored"]
             state.pop(h, None)
-        final = join_final_spo_v2(article, classify_rec, ent_rec, spo_rec)
+        final = join_final_spo_v2(article, classify_rec, ent_rec, spo_rec, meta_rec, spon_rec)
         rep_final.append(final)
         bump("final_ok" if final["ok"] else "final_fail")
+        if final.get("sponsored"):
+            bump("sponsored_true")
         bump("pending", -1)
-        if final["ok"]:
+        if ent_rec and ent_rec.get("ok"):
             bump("entities_total", len(final.get("entities", [])))
             bump("triples_total", len(final.get("triples", [])))
             bump("central_total", final.get("n_central", 0))
@@ -295,22 +335,32 @@ def main():
                 state[article["url_hash"]] = {"is_junk_short_circuit": True}
             bump("pending", -1)
             return
+        h = article["url_hash"]
         with state_lock:
-            state[article["url_hash"]] = {"article": article, "classify": classify_rec}
-        if article["url_hash"] not in done_entities:
+            state[h] = {"article": article, "classify": classify_rec}
+        # 3-way fan-out: entities_only + meta + sponsored. spo_pipe odpala się po entities_only OK.
+        if h not in done_entities:
             q_entities.put(article)
         else:
-            # Resume: entities_only zrobione, użyj cache, idź dalej
-            cached = entities_cache.get(article["url_hash"])
+            cached = entities_cache.get(h)
             if cached:
                 fan_out_after_entities(article, cached)
             else:
-                # entities_jsonl miał rec ale ok=False — short circuit
                 with state_lock:
-                    state[article["url_hash"]]["entities_only"] = {"ok": False, "error": "cached_fail"}
-                    state[article["url_hash"]]["spo_pipe"] = {"ok": False, "error": "skipped_entities_failed",
-                                                              "triples": []}
-                try_finalize(article["url_hash"])
+                    state[h]["entities_only"] = {"ok": False, "error": "cached_fail"}
+                    state[h]["spo_pipe"] = {"ok": False, "error": "skipped_entities_failed",
+                                            "triples": []}
+        if h not in done_meta:
+            q_meta.put(article)
+        else:
+            with state_lock:
+                state[h]["meta"] = {"ok": True}
+        if h not in done_sponsored:
+            q_sponsored.put(article)
+        else:
+            with state_lock:
+                state[h]["sponsored"] = {"ok": True}
+        try_finalize(h)
 
     def handle_classify(article):
         rec = process_classify_v2(VLLM_BASE_URL, VLLM_MODEL, sys_classify, article)
@@ -323,6 +373,9 @@ def main():
                 "url_hash": article["url_hash"], "id": article["id"], "url": article["url"],
                 "ok": False, "error": "classify_failed", "is_junk": False,
                 "entities": [], "triples": [],
+                "language": "", "category": "", "title": "", "meta_description": "",
+                "h1": "", "article_summary": "",
+                "sponsored": False, "sponsored_subtype": None, "sponsored_justification": "",
                 "ts": datetime.now().isoformat(timespec="seconds"),
             })
             bump("final_fail")
@@ -353,18 +406,30 @@ def main():
         fan_out_after_entities(article, rec)
 
     def handle_spo_pipe(article):
-        # Pobierz entities z state
+        # Pull the upstream entities_only result from state (was placed there by
+        # fan_out_after_entities). For v3 rich-JSON we use chat_json on a structured
+        # schema — guaranteed-valid output, no parse errors possible.
         with state_lock:
             ent_rec = state.get(article["url_hash"], {}).get("entities_only", {})
         entities = ent_rec.get("entities", []) if ent_rec else []
-        rec = process_spo_pipe_v2(VLLM_BASE_URL, VLLM_MODEL, sys_spo, article, entities,
-                                  max_tokens=MAX_TOKENS_SPO_PIPE)
+        # v3 rich SPO budget: 40 triples × ~100 tok + central_entities + primary_topic +
+        # envelope ≈ 4200. Bump from old pipe MAX_TOKENS_SPO_PIPE=2000.
+        rec = process_spo_pipe_v2(client, sys_spo, schema_spo, article, entities,
+                                  max_tokens=MAX_TOKENS_SPO_PIPE_V3)
         rep_spo.append(rec)
-        # Append raw LLM pipe output do spo_raw.txt (przed parsowaniem) — same triplety, bez headerów
-        if rec.get("raw"):
-            block = rec["raw"].rstrip() + "\n"
+        # spo_raw.txt — one JSON line per article with the rich block (replaces the legacy
+        # raw-text pipe dump; rich fields can't be flattened to text).
+        if rec.get("ok"):
+            raw_obj = {
+                "url_hash": rec["url_hash"],
+                "id": rec["id"],
+                "url": article.get("url"),
+                "primary_topic": rec.get("primary_topic", ""),
+                "central_entities": rec.get("central_entities", []),
+                "triples": rec.get("triples", []),
+            }
             with spo_raw_lock, open(spo_raw_path, "a", encoding="utf-8") as f:
-                f.write(block)
+                f.write(json.dumps(raw_obj, ensure_ascii=False) + "\n")
         add_timing("spo_pipe", article["url_hash"], rec["latency_s"], rec["ok"], rec.get("attempts", 1))
         bump("spo_ok" if rec["ok"] else "spo_fail")
         if not rec["ok"]:
@@ -372,24 +437,61 @@ def main():
         else:
             log_spo.info(
                 f"OK {article['id']} n_triples={len(rec.get('triples', []))} "
-                f"parse_err={rec.get('parse_errors', 0)} s_unm={rec.get('triples_s_unmatched', 0)} "
+                f"s_unm={rec.get('triples_s_unmatched', 0)} "
                 f"lat={rec['latency_s']}s "
                 f"tok_in={rec['usage'].get('prompt_tokens', 0)} tok_out={rec['usage'].get('completion_tokens', 0)} "
                 f"finish={rec.get('finish_reason')} "
                 f"(running ok={counters['spo_ok']} fail={counters['spo_fail']})"
             )
-            if rec.get("sample_bad_lines"):
-                log_spo.info(f"  sample_bad: {rec['sample_bad_lines']}")
         with state_lock:
             state.setdefault(article["url_hash"], {})["spo_pipe"] = rec
         try_finalize(article["url_hash"])
 
+    def handle_meta(article):
+        rec = process_meta_v2(client, sys_meta, schema_meta, article,
+                              max_tokens=MAX_TOKENS_STEP2, sampling=SAMPLING_STEP2)
+        rep_meta.append(rec)
+        add_timing("meta", article["url_hash"], rec["latency_s"], rec["ok"], rec.get("attempts", 1))
+        bump("meta_ok" if rec["ok"] else "meta_fail")
+        if not rec["ok"]:
+            log_meta.warning(f"FAIL {article['id']}: {rec['error']}")
+        else:
+            log_meta.info(
+                f"OK {article['id']} cat={rec.get('category')!r} lang={rec.get('language')!r} "
+                f"lat={rec['latency_s']}s "
+                f"tok_in={rec['usage'].get('prompt_tokens', 0)} tok_out={rec['usage'].get('completion_tokens', 0)} "
+                f"(running ok={counters['meta_ok']} fail={counters['meta_fail']})"
+            )
+        with state_lock:
+            state.setdefault(article["url_hash"], {})["meta"] = rec
+        try_finalize(article["url_hash"])
+
+    def handle_sponsored(article):
+        rec = process_sponsored_v1(client, sys_spon, schema_spon, article,
+                                   max_tokens=MAX_TOKENS_SPONSORED, sampling=SAMPLING_SPONSORED)
+        rep_sponsored.append(rec)
+        add_timing("sponsored", article["url_hash"], rec["latency_s"], rec["ok"], rec.get("attempts", 1))
+        bump("sponsored_ok" if rec["ok"] else "sponsored_fail")
+        if not rec["ok"]:
+            log_sponsored.warning(f"FAIL {article['id']}: {rec['error']}")
+        else:
+            log_sponsored.info(
+                f"OK {article['id']} sponsored={rec.get('sponsored')} "
+                f"subtype={rec.get('sponsored_subtype')!r} "
+                f"just={rec.get('sponsored_justification', '')[:80]!r} lat={rec['latency_s']}s "
+                f"(running ok={counters['sponsored_ok']} fail={counters['sponsored_fail']})"
+            )
+        with state_lock:
+            state.setdefault(article["url_hash"], {})["sponsored"] = rec
+        try_finalize(article["url_hash"])
+
     def worker():
+        """Drain-first: spo_pipe > {entities, meta, sponsored} (LBQF) > classify."""
+        toggle = [0]
         while True:
             if shutdown.is_set():
                 return
-            # priority: spo_pipe > entities_only > classify (drain-first, GPU saturation utrzymywana
-            # przez fallback na classify gdy późniejsze etapy puste; minimalizuje peak `state[]`).
+            # P1: spo_pipe (najgłębsze in-flight)
             try:
                 art = q_spo.get_nowait()
                 try:
@@ -399,15 +501,39 @@ def main():
                 continue
             except queue.Empty:
                 pass
-            try:
-                art = q_entities.get_nowait()
+            # P2: 3 równoległe etapy {entities_only, meta, sponsored} — longest-queue-first
+            sizes = {
+                "entities": q_entities.qsize(),
+                "meta": q_meta.qsize(),
+                "sponsored": q_sponsored.qsize(),
+            }
+            if any(v > 0 for v in sizes.values()):
+                max_size = max(sizes.values())
+                cands = [k for k, v in sizes.items() if v == max_size and v > 0]
+                if len(cands) == 1:
+                    pick = cands[0]
+                else:
+                    order = ["entities", "meta", "sponsored"]
+                    start = toggle[0] % 3
+                    pick = next(
+                        (order[(start + i) % 3] for i in range(3) if order[(start + i) % 3] in cands),
+                        cands[0],
+                    )
+                    toggle[0] = (toggle[0] + 1) % 3
+                qmap = {"entities": q_entities, "meta": q_meta, "sponsored": q_sponsored}
+                handler_map = {
+                    "entities": handle_entities_only, "meta": handle_meta, "sponsored": handle_sponsored,
+                }
                 try:
-                    handle_entities_only(art)
-                finally:
-                    q_entities.task_done()
-                continue
-            except queue.Empty:
-                pass
+                    art = qmap[pick].get_nowait()
+                    try:
+                        handler_map[pick](art)
+                    finally:
+                        qmap[pick].task_done()
+                    continue
+                except queue.Empty:
+                    pass
+            # P3: classify (nowy materiał)
             try:
                 art = q_classify.get(timeout=0.1)
                 try:
@@ -472,10 +598,10 @@ def main():
             w.writerow(row)
 
     run_meta = {
-        "pipeline": "spo_v2",
+        "pipeline": "spo_v2_full",
         "limit": args.limit,
         "concurrency": args.concurrency,
-        "pattern": "three_step_classify_entities_only_then_spo_pipe",
+        "pattern": "classify_then_3way_(entities_only+meta+sponsored)_then_spo_pipe",
         "random_sample": args.random,
         "seed": args.seed,
         "skip_junk": not args.no_skip_junk,
@@ -501,7 +627,7 @@ def main():
     n = (n_seen - n_skipped_done) or 1
     classify_ok = counters['classify_ok'] or 1
     summary = f"""=== {out_dir.name} ===
-  pipeline=spo_v2 (classify → entities_only → spo_pipe, three-step pipe-format)
+  pipeline=spo_v2_full (classify → entities_only + meta + sponsored, then spo_pipe)
   limit={args.limit}  random={args.random}  seed={args.seed}  skip_junk={not args.no_skip_junk}
   concurrency={args.concurrency}
   websites={args.websites}
@@ -512,9 +638,12 @@ LICZNIKI:
   classify       ok={counters['classify_ok']} fail={counters['classify_fail']}  (junk={counters['junk']})
   entities_only  ok={counters['entities_ok']} fail={counters['entities_fail']}
   spo_pipe       ok={counters['spo_ok']} fail={counters['spo_fail']}
+  meta           ok={counters['meta_ok']} fail={counters['meta_fail']}
+  sponsored      ok={counters['sponsored_ok']} fail={counters['sponsored_fail']}  (sponsored_true={counters['sponsored_true']})
   final          ok={counters['final_ok']} fail={counters['final_fail']}
 
 JUNK%:                {counters['junk']/classify_ok*100:.2f}%
+SPONSORED%:           {counters['sponsored_true']/max(counters['sponsored_ok'],1)*100:.2f}% (z non-junk OK)
 ENTITIES total:       {counters['entities_total']}
 CENTRAL total:        {counters['central_total']}  (avg/article = {counters['central_total']/max(counters['entities_ok'],1):.2f})
 TRIPLES total:        {counters['triples_total']}  (avg/article = {counters['triples_total']/max(counters['spo_ok'],1):.2f})

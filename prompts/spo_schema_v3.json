@@ -1,0 +1,107 @@
+{
+  "$comment": "v3 rich-JSON schema for spo_v1 pipeline (cram: entities + SPO in single LLM call). Replaces basic spo_schema_v1.json (which had simple s/p/o triples). relation_type freeform for bootstrap; v4 will close it to enum after harvest.",
+  "type": "object",
+  "properties": {
+    "primary_topic": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "entities": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "maxLength": 100},
+          "type": {
+            "type": "string",
+            "enum": [
+              "Address", "Age", "Airport", "Area", "City", "ComputingProduct",
+              "Continent", "CountryRegion", "CulturalEvent", "Currency",
+              "Date", "DateRange", "DateTime", "DateTimeRange", "Dimension",
+              "Duration", "Email", "Event", "Geographical", "GPE", "Height",
+              "Information", "IpAddress", "Length", "Location", "NaturalEvent",
+              "Number", "NumberRange", "Ordinal", "Organization",
+              "OrganizationMedical", "OrganizationSports",
+              "OrganizationStockExchange", "Percentage", "Person", "PersonType",
+              "PhoneNumber", "Product", "SetTemporal", "Skill", "Speed",
+              "SportsEvent", "State", "Structural", "Temperature", "Temporal",
+              "Time", "TimeRange", "URL", "Volume", "Weight"
+            ]
+          },
+          "is_central": {"type": "boolean"}
+        },
+        "required": ["name", "type", "is_central"],
+        "additionalProperties": false
+      }
+    },
+    "central_entities": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "entity_name": {"type": "string", "maxLength": 200},
+          "centrality": {"type": "string", "enum": ["primary", "secondary"]}
+        },
+        "required": ["entity_name", "centrality"],
+        "additionalProperties": false
+      }
+    },
+    "triples": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "properties": {
+          "subject": {"type": "string", "maxLength": 200},
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "Address", "Age", "Airport", "Area", "City", "ComputingProduct",
+              "Continent", "CountryRegion", "CulturalEvent", "Currency",
+              "Date", "DateRange", "DateTime", "DateTimeRange", "Dimension",
+              "Duration", "Email", "Event", "Geographical", "GPE", "Height",
+              "Information", "IpAddress", "Length", "Location", "NaturalEvent",
+              "Number", "NumberRange", "Ordinal", "Organization",
+              "OrganizationMedical", "OrganizationSports",
+              "OrganizationStockExchange", "Percentage", "Person", "PersonType",
+              "PhoneNumber", "Product", "SetTemporal", "Skill", "Speed",
+              "SportsEvent", "State", "Structural", "Temperature", "Temporal",
+              "Time", "TimeRange", "URL", "Volume", "Weight"
+            ]
+          },
+          "relation_type": {"type": "string", "maxLength": 50},
+          "predicate_phrase": {"type": "string", "maxLength": 100},
+          "object": {"type": "string", "maxLength": 300},
+          "object_type": {
+            "type": "string",
+            "enum": [
+              "Address", "Age", "Airport", "Area", "City", "ComputingProduct",
+              "Continent", "CountryRegion", "CulturalEvent", "Currency",
+              "Date", "DateRange", "DateTime", "DateTimeRange", "Dimension",
+              "Duration", "Email", "Event", "Geographical", "GPE", "Height",
+              "Information", "IpAddress", "Length", "Location", "NaturalEvent",
+              "Number", "NumberRange", "Ordinal", "Organization",
+              "OrganizationMedical", "OrganizationSports",
+              "OrganizationStockExchange", "Percentage", "Person", "PersonType",
+              "PhoneNumber", "Product", "SetTemporal", "Skill", "Speed",
+              "SportsEvent", "State", "Structural", "Temperature", "Temporal",
+              "Time", "TimeRange", "URL", "Volume", "Weight"
+            ]
+          },
+          "object_kind": {"type": "string", "enum": ["entity", "literal"]},
+          "evidence_span": {"type": "string", "maxLength": 500},
+          "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+        },
+        "required": [
+          "subject", "subject_type", "relation_type", "predicate_phrase",
+          "object", "object_type", "object_kind", "evidence_span", "confidence"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["primary_topic", "entities", "central_entities", "triples"],
+  "additionalProperties": false
+}
