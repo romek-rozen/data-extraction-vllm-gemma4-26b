@@ -1,0 +1,4 @@
+2026-05-08 21:44:51 === SPO v3 overnight master start ===
+21:44:51 v1 bench dir exists (/home/spark001/Spark-testy/mateusz-g-two-step-vllm/final_results/2026-05-08_21-42-38__spo_v1_v3_bench_1k_s42) but not finalized — waiting for it to complete
+2026-05-08 21:47:17 === SPO v3 overnight master start ===
+21:47:17 v1 bench dir exists (/home/spark001/Spark-testy/mateusz-g-two-step-vllm/final_results/2026-05-08_21-42-38__spo_v1_v3_bench_1k_s42) but not finalized — waiting for it to complete
