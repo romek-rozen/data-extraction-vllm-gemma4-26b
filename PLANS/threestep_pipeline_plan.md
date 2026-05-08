@@ -339,9 +339,111 @@ lib/pipeline_fourstep_v1.py              ← reuse v2 + process_sponsored_v1
 scripts/run_fourstep_v1.py               ← single pool 6 + 4 priority queues
 ```
 
-### Pełen run v4 — TODO
+### Architektura runtime (mermaid)
 
-Pełen run na 500 URL nie odpalony jeszcze (decyzja użytkownika). Liczby do uzupełnienia po runie. Plus run na nowo zescrapowanych domenach (`websites_intymnehistorie/`, `websites_exposilesia/`).
+Pełen flow z single-pool 6 workerów + 4 priority queues + junk-skip + vLLM batch:
+
+```mermaid
+flowchart TD
+    A["websites/<br/>13.7k articles"] --> B[data_loader<br/>load_articles]
+    B --> Q0(["q_classify"])
+
+    subgraph POOL["ThreadPoolExecutor (max_workers = 6) — single pool, wzorzec A"]
+        direction LR
+        W1["worker 1"]
+        W2["worker 2"]
+        W3["worker 3"]
+        W4["worker 4"]
+        W5["worker 5"]
+        W6["worker 6"]
+    end
+
+    Q0 -.priority 1.- POOL
+    Q1(["q_meta"]) -.priority 2.- POOL
+    Q2(["q_entities"]) -.priority 2.- POOL
+    Q3(["q_sponsored"]) -.priority 2.- POOL
+
+    POOL --> CL{{"call vLLM<br/>guided_choice 0/1"}}
+    CL --> JD{is_junk?}
+    JD -- "junk = 1<br/>~17% (v2.1)" --> JS["make_junk_stub_final_v4<br/>{is_junk: true,<br/>sponsored: false,<br/>entities: [], meta: ''}"]
+    JS --> FINAL[("final.jsonl")]
+
+    JD -- "not junk<br/>~83%" --> FANOUT[fan_out_after_classify]
+    FANOUT --> Q1
+    FANOUT --> Q2
+    FANOUT --> Q3
+
+    POOL --> META["process_meta_v2<br/>schema_meta_v2:<br/>language, category, title,<br/>meta_description, h1, summary"]
+    POOL --> ENT["process_entities_v2<br/>schema_entities_v2:<br/>entities[51 Azure NER types]"]
+    POOL --> SPON["process_sponsored_v1<br/>schema_sponsored_v1:<br/>sponsored, subtype, justification<br/>+ PUBLISHER DOMAIN context"]
+
+    META --> M[("meta.jsonl")]
+    ENT --> E[("entities.jsonl")]
+    SPON --> S[("sponsored.jsonl")]
+
+    M -.- JF
+    E -.- JF
+    S -.- JF
+    JF[try_finalize<br/>after meta && ent && spon all OK] --> FINAL
+
+    POOL ==>|"all 6 workers feed<br/>requests in parallel"| VLLM[(vLLM /v1/chat/completions<br/>--max-num-seqs 8<br/>continuous batching)]
+    VLLM ==>|"GPU pcie batch<br/>8 sequences in one step"| GPU{{"DGX Spark sm_121<br/>Gemma-4-26B-A4B-NVFP4<br/>FP4 weights + FP8 KV cache"}}
+
+    classDef junkStyle fill:#fff5d6,stroke:#c7a008
+    classDef parallelStyle fill:#d0e8ff,stroke:#0066cc
+    classDef gpuStyle fill:#ffe0e0,stroke:#cc0000
+    classDef storageStyle fill:#e8f5e8,stroke:#2d8f2d
+
+    class JD,JS,FANOUT junkStyle
+    class META,ENT,SPON parallelStyle
+    class VLLM,GPU gpuStyle
+    class FINAL,M,E,S storageStyle
+```
+
+**Logika worker'a (load-balanced priority pull):**
+
+```
+1. q_classify (priority 1) — szybkie zadanie ~0.2-0.5s, drain ASAP
+2. Jeśli classify pusty → load-balance między q_meta, q_entities, q_sponsored
+   (bierz z najdłuższej kolejki, przy remisie round-robin toggle)
+```
+
+**Trzy ścieżki na URL:**
+
+```
+URL → classify (head 500 + tail 500 chars + URL/PATH/QUERY)
+   ├─ junk=1 → junk_stub → final.jsonl  (KONIEC, no meta/entities/sponsored)
+   └─ junk=0 → fan-out 3-way:
+              ├→ q_meta     → meta.jsonl
+              ├→ q_entities → entities.jsonl
+              └→ q_sponsored → sponsored.jsonl
+
+   gdy wszystkie 3 OK → join_final_v4 → final.jsonl
+```
+
+**Pod spodem vLLM** batchuje natywnie do `max-num-seqs=8`. Mamy 6 workerów = 6 inflight, więc 2 z 8 batch slotów stoją wolne. Świadomy trade-off (Spark dławi się na 8 = utrata stabilności).
+
+### Pełen run v4_1000 (pierwsza wersja, prompt v2.0)
+
+`final_results/2026-05-08_14-20-23__fourstep_v1_v4_1000_c6/`
+
+| Metryka | Wartość |
+|---|---|
+| Wall | 4213.2 s = 1h 10min |
+| Throughput | 854 URL/h, 4.21 s/URL |
+| Junk classified | 22 (2.20%) |
+| Sponsored | 577/978 (**59.0%** non-junk) |
+| Fail rate | 0/1000 (**0%**) |
+
+Subtypes: `link_insertion 296` / `full_sponsored 267` / `brand_mentions 12`.
+
+Sample dominują biznews.com.pl (627/1000 = 64% próbki, sponsored 89.5%). Bez tego portalu pozostałe 351 URL z 9 domen mają ~5% sponsored.
+
+### Pełen run v4_1000_v2_1 (prompt v2.1 — URL signals + head+tail)
+
+W trakcie. Wstępne sygnały: junk **~17%** (vs 2.2% w v4_1000) — URL signals łapią paginowane kategorie i tag pages. Eyeball 8 random junków: **8/8 true positives**, zero false positives.
+
+Liczby finalne do uzupełnienia.
 
 ---
 

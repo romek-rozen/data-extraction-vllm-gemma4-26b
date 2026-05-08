@@ -242,6 +242,59 @@ Subtype enum: `[null, full_sponsored, link_insertion, brand_mentions, advertoria
 
 **Kluczowa cecha:** prompt zawiera `PUBLISHER DOMAIN: <domain>` linię — model rozróżnia internal vs external linki. Bez tego błędnie flag'ował publishery promujące swój własny sklep jako `link_insertion`.
 
+#### Architektura runtime
+
+Single-pool 6 workerów + 4 priority queues + junk-skip + vLLM batch:
+
+```mermaid
+flowchart TD
+    A["websites/<br/>13.7k articles"] --> B[data_loader] --> Q0(["q_classify"])
+
+    subgraph POOL["ThreadPoolExecutor (max_workers=6) — wzorzec A"]
+        W1["worker 1"]
+        W2["worker 2"]
+        W3["worker 3"]
+        W4["worker 4"]
+        W5["worker 5"]
+        W6["worker 6"]
+    end
+
+    Q0 -.priority 1.- POOL
+    Q1(["q_meta"]) -.priority 2.- POOL
+    Q2(["q_entities"]) -.priority 2.- POOL
+    Q3(["q_sponsored"]) -.priority 2.- POOL
+
+    POOL --> CL{is_junk?}
+    CL -- "1 (~17%)" --> JS["junk_stub<br/>{is_junk: true}"] --> FINAL[("final.jsonl")]
+    CL -- "0 (~83%)" --> FAN[fan_out 3-way]
+    FAN --> Q1
+    FAN --> Q2
+    FAN --> Q3
+
+    POOL --> META["meta_v2"] --> M[("meta.jsonl")]
+    POOL --> ENT["entities_v2"] --> E[("entities.jsonl")]
+    POOL --> SPON["sponsored_v1<br/>+ PUBLISHER DOMAIN"] --> S[("sponsored.jsonl")]
+
+    M -.- JF[try_finalize<br/>meta && ent && spon all OK]
+    E -.- JF
+    S -.- JF
+    JF --> FINAL
+
+    POOL ==>|"6 workers feed in parallel"| VLLM[(vLLM<br/>--max-num-seqs 8<br/>continuous batching)]
+    VLLM ==>|"GPU batch ≤8 sequences"| GPU{{"DGX Spark sm_121<br/>Gemma-4-26B-A4B-NVFP4"}}
+
+    classDef junkStyle fill:#fff5d6,stroke:#c7a008
+    classDef parallelStyle fill:#d0e8ff,stroke:#0066cc
+    classDef gpuStyle fill:#ffe0e0,stroke:#cc0000
+    class CL,JS,FAN junkStyle
+    class META,ENT,SPON parallelStyle
+    class VLLM,GPU gpuStyle
+```
+
+**Worker logic (load-balanced priority pull):** classify queue ma priorytet (drain ASAP, ~0.2-0.5 s/URL). Po opróżnieniu workery wybierają meta/entities/sponsored po długości kolejki (longest-queue-first, przy remisie round-robin). Junk-skip pomija ~17% URL (kategorie, tagi, paginacja, 404) — oszczędza ~3 LLM calls × ~10 s każdy.
+
+vLLM batchuje natywnie do `--max-num-seqs=8`; mamy 6 workerów → 2 sloty wolne (świadomy trade-off, Spark dławi się na 8). Pełen techniczny opis w [`PLANS/threestep_pipeline_plan.md`](PLANS/threestep_pipeline_plan.md).
+
 #### Uruchomienie four-step v1
 
 ```bash
