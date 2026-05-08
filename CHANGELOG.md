@@ -2,6 +2,73 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-08 (późna noc, 23:08) — Cache portability Spark→prod + 64w benchmark
+
+**Test 64 workers ProcessPool** (po refaktorze D28):
+- 25667 art warmup w **93.5s = 274/s** (2× szybciej niż 16w 137/s).
+- Stabilny rate przez cały run (273-274/s od 1k do 25k articles — żadnego spadku tempa).
+- RAM peak 108GB / 121GB total (głównie vLLM + worker forks). Swap 3.6GB.
+
+**Sweet spot 64w ALE z RAM stress** — bezpieczny default dla Sparka pozostaje 16-32w
+(w zależności od kontekstu). 64w OK na hostach gdzie dyskretny GPU trzyma model osobno
+(VRAM, nie RAM hosta).
+
+**Cache portability — empirycznie zwalidowane:**
+- `websites_cache/<sha256(url)>.json` deterministyczne — ten sam URL → ten sam plik
+  na każdej maszynie (modulo wersji trafilatury).
+- Cache size: 181 MB raw / **44 MB tar.gz** (4.1× kompresja) dla 25667 art.
+- Estymata dla 26M: ~45 GB tar.gz, transfer rsync ~8 min @ 1 Gbps.
+- **Strategia produkcyjna:** build cache na Sparku (operacyjne $0, ~26h dla 26M URL),
+  tar.gz, rsync na RTX 6000 Pro host, run LLM-only z `--no-warmup --no-clear-cache`.
+- Oszczędność billable GPU time: ~1-3 dni (CPU warmup nie kradnie GPU $/h).
+
+**Pliki:**
+- `PLANS/production_deployment.md` (nowy) — pełen plan deployu cache + RAM/CPU
+  topology Spark vs prod + TODO.
+
+**Commit:** `<pending>`.
+
+---
+
+## 2026-05-08 (późna noc) — streaming_loader ProcessPool: 12× cache warmup (26M URL feasibility unlocked!)
+
+**Kontekst:** w trakcie live cache warmup (Stage 2 master orchestrator) zauważyliśmy że
+ThreadPool 8w daje tylko ~7/s mimo 20-rdzeniowego ARM Sparka. Diagnostyka py-spy:
+trafilatura ma dużo Pythona po stronie heurystyk → GIL serializuje wszystkich 8 workerów
+do efektywnie ~1.4 rdzenia.
+
+**Fix:** dodano `executor_kind: "thread" | "process"` do `lib/streaming_loader.py`.
+Wyciągnięto `_load_one_core` na poziom modułu (picklable). Pomiar A/B (clean, 200 art):
+
+| Tryb | Throughput | Speedup |
+|---|---|---|
+| ThreadPool 8w | 18.0/s | 1× |
+| ProcessPool 8w | 52.9/s | 2.9× |
+| ProcessPool 16w | **84.1/s** | **4.7×** |
+| ProcessPool 20w | 83.4/s | 4.6× (saturated) |
+
+Live warmup po restarcie z 16w: ~95/s w produkcji (cleaner state). 25667 art warmup
+~5 min vs ~50 min poprzednio.
+
+**Dla 26M URL prod (RTX 6000 Pro):**
+- Stary: 26M ÷ 7/s = **44 dni** tylko warmup CPU.
+- Nowy: 26M ÷ 84/s = **3.6 dnia**.
+- **Bez tego refaktoru cache warmup byłby separate bottleneckiem porównywalnym z LLM**
+  inference. Refactor odblokowuje skalę.
+
+**Pliki:**
+- `lib/streaming_loader.py`: NEW `_load_one_core` (picklable), `executor_kind` param,
+  ProcessPool dispatch, stats aggregation z return tuple.
+- `scripts/run_spo_v1_v2_test.py`: default `--loader-workers 16`, `executor_kind="process"`.
+- `DECISIONS.md`: D28 (pełna analiza + benchmark + RAM trade-off).
+
+**Backward compat:** default `executor_kind="thread"` — wszystkie istniejące skrypty
+działają bez zmian. Tylko explicit opt-in `executor_kind="process"` aktywuje nową ścieżkę.
+
+**Commits:** `a2fc0e8` (refactor + test), `7db4969` (D28 doc).
+
+---
+
 ## 2026-05-09 (rano) — SPO v3 full parallel A/B + maxItems removed
 
 **Zmiana planu po cząstkowym benchu v1 (354/1000):**
