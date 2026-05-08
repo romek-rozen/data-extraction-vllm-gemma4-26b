@@ -79,6 +79,11 @@ if [ -n "$V1_DIR" ] && [ -n "$V2_DIR" ]; then
 fi
 echo "$(date '+%H:%M:%S') winner: $WINNER" >> "$LOG"
 
+# ----- Stage 3.5: write comparison report (markdown) -----
+echo "$(date '+%H:%M:%S') generating v1 vs v2 comparison report" >> "$LOG"
+python3 "$REPO/scripts/spo_compare_benches.py" --tag v3_bench_1k_s42 \
+    >> "$LOG" 2>&1 || echo "$(date '+%H:%M:%S') compare report failed (non-fatal)" >> "$LOG"
+
 # ----- Stage 4: full run of winner on 25667 articles, cold cache, concurrency=8 -----
 clear_cache
 echo "$(date '+%H:%M:%S') launching FULL run: spo_$WINNER on all 25667 articles, --limit 0 --concurrency 8" >> "$LOG"
