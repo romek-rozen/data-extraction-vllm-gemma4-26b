@@ -295,26 +295,48 @@ flowchart TD
 
 vLLM batchuje natywnie do `--max-num-seqs=8`; mamy 6 workerów → 2 sloty wolne (świadomy trade-off, Spark dławi się na 8). Pełen techniczny opis w [`PLANS/threestep_pipeline_plan.md`](PLANS/threestep_pipeline_plan.md).
 
-#### Uruchomienie four-step v1
+#### Uruchomienie four-step v1 — orchestrator
+
+Polecany sposób — `scripts/run_full_fourstep.py` z presetami i automatycznym podsumowaniem (vLLM check + run + per-domain top junk/sponsored po skończeniu):
 
 ```bash
-# 500 random URL, seed=42, concurrency 6 (Spark)
-python3 -u scripts/run_fourstep_v1.py --limit 500 --random --tag v4_500 --concurrency 6
+# Smoke 5 URL — szybki sanity test (~30s)
+python3 scripts/run_full_fourstep.py --preset smoke
 
-# 1000 URL
-python3 -u scripts/run_fourstep_v1.py --limit 1000 --random --tag v4_1000_c6 --concurrency 6
+# Standardowe presety
+python3 scripts/run_full_fourstep.py --preset small    # 100 URL random
+python3 scripts/run_full_fourstep.py --preset medium   # 500 URL random
+python3 scripts/run_full_fourstep.py --preset large    # 1000 URL random  ← polecane do benchmarku
+python3 scripts/run_full_fourstep.py --preset full     # wszystkie URL z websites/
 
-# wszystkie URL z websites/
-python3 -u scripts/run_fourstep_v1.py --limit 0 --tag v4_full --concurrency 6
+# Z tagiem (czytelny katalog w final_results/)
+python3 scripts/run_full_fourstep.py --preset large --tag v4_1000_test
 
-# resume po przerwaniu
-python3 -u scripts/run_fourstep_v1.py --resume final_results/<ts>__fourstep_v1_<tag>
+# Pipeline na własnym scrape
+python3 scripts/run_full_fourstep.py --preset full \
+    --websites websites_intymnehistorie/ --tag intymne
 
-# bez junk-skip (sanity check — wszystkie URL idą przez meta+entities+sponsored)
-python3 -u scripts/run_fourstep_v1.py --limit 100 --random --no-skip-junk
+# Resume po crashu
+python3 scripts/run_full_fourstep.py --resume final_results/<ts>__fourstep_v1_<tag>
 
-# pipeline na zescrapowanej domenie (np. własny crawl)
-python3 -u scripts/run_fourstep_v1.py --limit 0 --tag mojadomena --websites websites_mojadomena/
+# Bez junk-skip (sanity — wszystkie URL przez meta/entities/sponsored)
+python3 scripts/run_full_fourstep.py --preset small --no-skip-junk
+```
+
+Po zakończeniu drukuje:
+- summary.txt (wall, throughput, junk%, sponsored%, fail rate)
+- top 10 domen po junk%
+- top 10 domen po sponsored%
+- linki do dashboard: `?page=junk-analysis`, `?page=sponsored`
+
+#### Uruchomienie four-step v1 — bezpośrednio (lower-level)
+
+Jeśli potrzebujesz pełnej kontroli nad parametrami:
+
+```bash
+python3 -u scripts/run_fourstep_v1.py --limit 1000 --random --tag v4_1000 --concurrency 6
+python3 -u scripts/run_fourstep_v1.py --resume final_results/<dir>
+python3 -u scripts/run_fourstep_v1.py --limit 0 --websites websites_X/ --tag X
 ```
 
 **W tmux (zalecane dla dłuższych runów):**

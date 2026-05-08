@@ -183,7 +183,12 @@ def process_meta_v2(
     max_tokens: int,
     sampling: dict[str, Any],
 ) -> dict:
+    domain = (article.get("domain") or "").lower().strip()
+    path = article.get("path", "")
     user = f"""Generate SEO meta and classify the article.
+
+PUBLISHER DOMAIN: {domain}
+PATH: {path}
 
 <article>
 {article['text']}
@@ -221,7 +226,12 @@ def process_entities_v2(
     max_tokens: int,
     sampling: dict[str, Any],
 ) -> dict:
+    domain = (article.get("domain") or "").lower().strip()
+    path = article.get("path", "")
     user = f"""Extract entities from the article below.
+
+PUBLISHER DOMAIN: {domain}
+PATH: {path}
 
 <article>
 {article['text']}

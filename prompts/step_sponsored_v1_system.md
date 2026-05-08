@@ -69,6 +69,14 @@ The user message will include `PUBLISHER DOMAIN: <domain>` line. This is the dom
 - Author has named byline with personal voice
 - Critical analysis, including drawbacks of the product/service
 - Article fits the publisher's typical editorial coverage
+- **Technical context mentions** — external domain/brand is named as part of technical configuration:
+  * SSL certificates (`*.cyberfolks.pl`, `Let's Encrypt`)
+  * Hostnames / server names (`smtp.gmail.com`, `imap.example.com`)
+  * IP addresses, DNS servers (`8.8.8.8`, `1.1.1.1`)
+  * Ports (`port 465 SMTP`, `587`, `993 IMAP`)
+  * Configuration paths, file paths, package names (`/etc/nginx/`, `npm install react`)
+  * API endpoints, well-known URLs (`googleapis.com/oauth2`)
+  These are **infrastructure/technical references**, NOT commercial endorsements. A tutorial mentioning `cyberfolks.pl` as an SSL host name is NOT sponsored, even if it's the only external domain in the article.
 
 ## RULES
 
@@ -189,6 +197,19 @@ OUTPUT:
   "sponsored_justification": "explicit '[Informacje prasowe]' tag + single product promotion + CTA, classic press placement"
 }
 ```
+
+### Example 10c — technical tutorial mentioning external domain as infrastructure (sponsored=false)
+PUBLISHER DOMAIN: webporadnik.pl
+INPUT: "## Logowanie do hekko poczta\nKonfiguracja konta wymaga znajomości portów. Do wysyłania wiadomości używaj **portu 587 lub 465** dla SMTP. Wszystkie połączenia chroni **certyfikat SSL *.cyberfolks.pl**, gwarantujący szyfrowanie danych.\n\n### Konfiguracja POP3/IMAP\nPOP3 (porty 110/995) pobiera maile..."
+OUTPUT:
+```json
+{
+  "sponsored": false,
+  "sponsored_subtype": null,
+  "sponsored_justification": "technical guide mentions *.cyberfolks.pl as SSL infrastructure hostname (not a commercial brand mention); ports/hostnames are config details"
+}
+```
+(Wzmianka `*.cyberfolks.pl` to nazwa hostname certyfikatu SSL, nie commercial promotion. Ports `587/465/993` też nie są sponsored.)
 
 ### Example 10b — multi-article aggregation page (sponsored=false, anti-pattern)
 PUBLISHER DOMAIN: biznews.com.pl
