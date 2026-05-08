@@ -19,7 +19,7 @@ from dashboard.data_loader import load_results, RESULTS_BASE  # noqa: E402
 from dashboard.components.filters import render_filters  # noqa: E402
 from dashboard.views import (  # noqa: E402
     run_summary, articles, entities, categories,
-    compare_runs, compare_onestep, analytics, drift, logs, sponsored,
+    compare_runs, compare_onestep, analytics, drift, logs, sponsored, junk_analysis,
 )
 
 PAGES = {
@@ -27,6 +27,7 @@ PAGES = {
     "articles": ("Eksplorator artykułów", articles),
     "entities": ("Encje (typy)", entities),
     "categories": ("Kategorie artykułów", categories),
+    "junk-analysis": ("🗑️ Junk Analysis", junk_analysis),
     "sponsored": ("🎯 Sponsored Detection", sponsored),
     "compare_runs": ("Porównanie runów", compare_runs),
     "compare_onestep": ("One-step vs Two-step", compare_onestep),
