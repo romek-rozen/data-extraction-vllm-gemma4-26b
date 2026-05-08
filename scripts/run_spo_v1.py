@@ -107,6 +107,26 @@ def main():
         suffix = f"__spo_v1_{args.tag}" if args.tag else "__spo_v1"
         out_dir = FINAL_RESULT_DIR / f"{ts}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Tee stdout+stderr → out_dir/stdout.log (zamiast /tmp). Łapie też tracebacki
+    # i wszystko co nie idzie przez logger.
+    class _Tee:
+        def __init__(self, *streams):
+            self.streams = streams
+        def write(self, s):
+            for st in self.streams:
+                try:
+                    st.write(s); st.flush()
+                except Exception:
+                    pass
+        def flush(self):
+            for st in self.streams:
+                try: st.flush()
+                except Exception: pass
+
+    _stdout_file = open(out_dir / "stdout.log", "a", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(sys.__stdout__, _stdout_file)
+    sys.stderr = _Tee(sys.__stderr__, _stdout_file)
     logger.info(f"out_dir = {out_dir}")
 
     log_classify = _make_phase_logger("classify", out_dir / "classify.log")
