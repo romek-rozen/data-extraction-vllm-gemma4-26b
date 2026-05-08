@@ -349,8 +349,11 @@ def join_final_spo_v2(
     classify_record: dict,
     entities_record: dict | None,
     spo_record: dict | None,
+    meta_record: dict | None = None,
+    sponsored_record: dict | None = None,
 ) -> dict:
-    """Złóż final.jsonl rekord z 3 etapów: classify + entities_only + spo_pipe."""
+    """Złóż final.jsonl rekord z classify + entities_only + spo_pipe (+ opcjonalnie meta + sponsored)."""
+    from lib.spo_pipeline_v1 import _merge_meta_into, _merge_sponsored_into
     out = {
         "url_hash": article["url_hash"],
         "id": article["id"],
@@ -387,4 +390,10 @@ def join_final_spo_v2(
         out["triples_o_unmatched"] = 0
         out["n_lines_total"] = 0
         out["error"] = "spo_pipe_failed" if not out.get("error") else f"{out['error']}+spo_pipe_failed"
+    _merge_meta_into(out, meta_record)
+    _merge_sponsored_into(out, sponsored_record)
+    if meta_record is not None:
+        out["ok"] = out["ok"] and bool(meta_record.get("ok"))
+    if sponsored_record is not None:
+        out["ok"] = out["ok"] and bool(sponsored_record.get("ok"))
     return out

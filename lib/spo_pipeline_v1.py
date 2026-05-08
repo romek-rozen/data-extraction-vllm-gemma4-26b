@@ -167,9 +167,12 @@ PATH: {path}
     return rec
 
 
+_META_FIELDS = ("language", "category", "title", "meta_description", "h1", "article_summary")
+
+
 def make_junk_stub_final_spo(article: dict, classify_record: dict) -> dict:
-    """Junk stub dla SPO pipeline — pusty entities + triples."""
-    return {
+    """Junk stub dla SPO pipeline — pusty entities/triples + neutralne meta/sponsored."""
+    stub = {
         "url_hash": article["url_hash"],
         "id": article["id"],
         "url": article["url"],
@@ -183,14 +186,48 @@ def make_junk_stub_final_spo(article: dict, classify_record: dict) -> dict:
         "n_central": 0,
         "skipped_reason": "junk_classified",
     }
+    # meta
+    for k in _META_FIELDS:
+        stub[k] = ""
+    # sponsored — junk z definicji NIGDY nie jest sponsored
+    stub["sponsored"] = False
+    stub["sponsored_subtype"] = None
+    stub["sponsored_justification"] = "junk_classified"
+    return stub
+
+
+def _merge_meta_into(out: dict, meta_record: dict | None) -> None:
+    if meta_record and meta_record.get("ok"):
+        for k in _META_FIELDS:
+            out[k] = meta_record.get(k, "")
+    else:
+        for k in _META_FIELDS:
+            out[k] = ""
+        if meta_record is not None:
+            out["error"] = "meta_failed" if not out.get("error") else f"{out['error']}+meta_failed"
+
+
+def _merge_sponsored_into(out: dict, sponsored_record: dict | None) -> None:
+    if sponsored_record and sponsored_record.get("ok"):
+        out["sponsored"] = bool(sponsored_record.get("sponsored", False))
+        out["sponsored_subtype"] = sponsored_record.get("sponsored_subtype")
+        out["sponsored_justification"] = sponsored_record.get("sponsored_justification", "")
+    else:
+        out["sponsored"] = False
+        out["sponsored_subtype"] = None
+        out["sponsored_justification"] = ""
+        if sponsored_record is not None:
+            out["error"] = "sponsored_failed" if not out.get("error") else f"{out['error']}+sponsored_failed"
 
 
 def join_final_spo(
     article: dict,
     classify_record: dict,
     entities_spo_record: dict | None,
+    meta_record: dict | None = None,
+    sponsored_record: dict | None = None,
 ) -> dict:
-    """Złóż final.jsonl rekord z 2 etapów: classify + entities_spo."""
+    """Złóż final.jsonl rekord z classify + entities_spo (+ opcjonalnie meta + sponsored)."""
     out = {
         "url_hash": article["url_hash"],
         "id": article["id"],
@@ -218,4 +255,11 @@ def join_final_spo(
         out["triples_s_unmatched"] = 0
         out["triples_o_unmatched"] = 0
         out["error"] = "entities_spo_failed"
+    _merge_meta_into(out, meta_record)
+    _merge_sponsored_into(out, sponsored_record)
+    # Update top-level ok: wszystkie etapy muszą być OK
+    if meta_record is not None:
+        out["ok"] = out["ok"] and bool(meta_record.get("ok"))
+    if sponsored_record is not None:
+        out["ok"] = out["ok"] and bool(sponsored_record.get("ok"))
     return out
