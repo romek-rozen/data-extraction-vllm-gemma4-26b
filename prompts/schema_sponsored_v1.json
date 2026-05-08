@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "sponsored": {"type": "boolean"},
+    "sponsored_subtype": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "full_sponsored",
+        "link_insertion",
+        "brand_mentions",
+        "advertorial"
+      ]
+    },
+    "sponsored_justification": {
+      "type": "string",
+      "maxLength": 120
+    }
+  },
+  "required": ["sponsored", "sponsored_subtype", "sponsored_justification"]
+}

@@ -9,8 +9,9 @@ final_result_v6_b/
 final_results/
 benchmark_results/
 
-# Scraper output (lokalne)
+# Scraper output (lokalne) — wszystkie websites_<name>/ folders
 websites_new/
+websites_*/
 scraper_logs/
 
 # Python

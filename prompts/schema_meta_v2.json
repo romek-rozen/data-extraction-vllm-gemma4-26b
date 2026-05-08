@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2}$"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "Automotive", "Beauty", "Business", "Computer games", "Construction",
+        "Cooking", "Culture, Art", "Diet, Weight loss", "Ecology",
+        "Economy, Industry", "Education, Science", "Entertainment",
+        "Family, Child, Pregnancy", "Fashion", "Finance, Banking and Insurance",
+        "Gastronomy", "Gossip, Celebrity Life, Lifestyle", "Health, Medicine",
+        "History", "House, Garden, Interiors",
+        "Household appliances and consumer electronics",
+        "IT, New technologies, Computers", "Law", "Marketing, Advertising, Media",
+        "Music", "News", "Other themes", "Photography and video-filming",
+        "Politics", "Power engineering", "Psychology, Personal development",
+        "Purchases, Opinions", "Real estate", "Religion", "Sex and eroticism",
+        "Sport, Fitness, Bodybuilding", "Tourism, Travel",
+        "Transport & Logistics", "Wedding", "Work",
+        "Zoology, agriculture and forestry"
+      ]
+    },
+    "title": {"type": "string", "maxLength": 70},
+    "meta_description": {"type": "string", "maxLength": 160},
+    "h1": {"type": "string", "maxLength": 100},
+    "article_summary": {"type": "string", "maxLength": 400}
+  },
+  "required": ["language", "category", "title", "meta_description", "h1", "article_summary"]
+}

@@ -211,6 +211,141 @@ Wyniki w `final_results/<ts>__<tag>/`:
 
 Estymowany czas dla 155 URL: ~10-15 min @ concurrency 8 na DGX Spark.
 
+## Three-step / Four-step (D7c — junk-skip + parallel meta‖entities + sponsored detection)
+
+Pipeline z **junk-skipem** (binary classifier `0/1` przed Step 1+2 dla 11.4% śmieciowych URL) i **równoległym** Step meta + entities. Cztery wersje zaimplementowane:
+
+| Wersja | Skrypt | Architektura |
+|---|---|---|
+| three-step v1 | `scripts/run_threestep.py` | 3 osobne ThreadPoolExecutor, classifier z pełnym 41-enum (FAIL D7c — classifier 2.63 s/URL za drogi) |
+| three-step v2 | `scripts/run_threestep_v2.py` | binary classifier `0/1` przez vLLM `guided_choice`, truncated input 1000 chars, classify mean **0.21 s/URL** |
+| three-step v3 | `scripts/run_threestep_v3.py` | single ThreadPoolExecutor + 3 priority queues + load-balancing (wzorzec A) |
+| **four-step v1** | `scripts/run_fourstep_v1.py` | three-step v3 + **sponsored detection jako 4-ta równoległa faza** |
+
+### Four-step v1 — z detekcją sponsorowanych artykułów
+
+Najnowsza wersja. Po classify uruchamia się 3 równoległe LLM calls per URL:
+- **meta** — generuje `{language, category, title, meta_description, h1, article_summary}`
+- **entities** — generuje listę encji `{name, type}` (Azure NER 51 typów)
+- **sponsored** — klasyfikuje czy artykuł jest sponsored (third-party paid placement)
+
+Sponsored detection zwraca:
+```json
+{
+  "sponsored": true,
+  "sponsored_subtype": "link_insertion",
+  "sponsored_justification": "single dofollow to brand-X.com in unrelated context"
+}
+```
+
+Subtype enum: `[null, full_sponsored, link_insertion, brand_mentions, advertorial]`. Owner-commercial (publisher promuje swój sklep na własnej domenie) i affiliate-style review NIE są flag'owane jako sponsored.
+
+**Kluczowa cecha:** prompt zawiera `PUBLISHER DOMAIN: <domain>` linię — model rozróżnia internal vs external linki. Bez tego błędnie flag'ował publishery promujące swój własny sklep jako `link_insertion`.
+
+#### Uruchomienie four-step v1
+
+```bash
+# 500 random URL, seed=42, concurrency 6 (Spark)
+python3 -u scripts/run_fourstep_v1.py --limit 500 --random --tag v4_500 --concurrency 6
+
+# 1000 URL
+python3 -u scripts/run_fourstep_v1.py --limit 1000 --random --tag v4_1000_c6 --concurrency 6
+
+# wszystkie URL z websites/
+python3 -u scripts/run_fourstep_v1.py --limit 0 --tag v4_full --concurrency 6
+
+# resume po przerwaniu
+python3 -u scripts/run_fourstep_v1.py --resume final_results/<ts>__fourstep_v1_<tag>
+
+# bez junk-skip (sanity check — wszystkie URL idą przez meta+entities+sponsored)
+python3 -u scripts/run_fourstep_v1.py --limit 100 --random --no-skip-junk
+
+# pipeline na zescrapowanej domenie (np. własny crawl)
+python3 -u scripts/run_fourstep_v1.py --limit 0 --tag mojadomena --websites websites_mojadomena/
+```
+
+**W tmux (zalecane dla dłuższych runów):**
+
+```bash
+tmux new -s benchmark
+python3 -u scripts/run_fourstep_v1.py --limit 1000 --random --tag v4_1000 --concurrency 6
+# Ctrl+B D — odłącz
+# tmux attach -t benchmark — wróć
+```
+
+#### Output four-step v1
+
+`final_results/<ts>__fourstep_v1_<tag>/`:
+```
+classified.jsonl     # binary classifier output (is_junk + raw)
+meta.jsonl           # SEO meta + category + language
+entities.jsonl       # Azure NER entities
+sponsored.jsonl      # sponsored classification
+final.jsonl          # join wszystkich 4 faz (kompatybilny z dashboardem)
+classify.log         # per-stage log: każde OK/FAIL z latencją
+meta.log
+entities.log
+sponsored.log
+run.log
+timing.csv           # latency per phase per URL
+run_meta.json        # config + counters
+summary.txt          # tabela liczbowa po runie
+```
+
+**Per-stage logi** ułatwiają debugging — możesz na żywo śledzić co robi każdy worker bez parsowania jednego wielkiego JSONL'a.
+
+### Three-step (bez sponsored detection)
+
+Jeśli **nie potrzebujesz** sponsored detection, użyj v3 (~5-7% szybszy bo o 1 fazę mniej):
+
+```bash
+# rekomendowany — single pool 6 + priority queues
+python3 -u scripts/run_threestep_v3.py --limit 1000 --random --tag v3_1000 --concurrency 6
+```
+
+### Wyniki pomiarów (500 URL, random seed=42)
+
+| Run | Wall s/URL | URL/h | Junk% | Junk recall | Jaccard | Fail rate |
+|---|---|---|---|---|---|---|
+| baseline5000 (Phase 5b, conc=6, sequential) | 3.48 | 1035 | 11.44% | — | — | 0% |
+| three-step v1 | 4.58 | 787 | 1.20% | 8.9% | 0.552 | 0.6% |
+| three-step v2 (1+3+4=8) | **3.26** | **1104** | 3.00% | 23.2% | 0.495 | 0% |
+| three-step v3 (single pool 6) | 3.75 | 960 | 3.20% | 25.0% | 0.489 | 0% |
+
+Three-step v2 b2 jest **+6.3% szybsze** niż baseline5000 (sequential phases) — pierwszy realny zysk. v3 ma czystszą architekturę ale mniejszy concurrency (6 zamiast 8 — Spark dławi się na 8). Pełne porównanie + sekwencja iteracji v1→v4 w [`PLANS/threestep_pipeline_plan.md`](PLANS/threestep_pipeline_plan.md).
+
+### Decyzja architektoniczna — dlaczego sponsored osobno?
+
+Sponsored detection to **klasyfikacja** (true/false z subtype'm), meta to **generacja** (kreatywna produkcja tekstu SEO). Łączenie ich w jednym promptcie rozmydla model — eksperymentalnie potwierdzone w v6 promptach Step 1 (każde dodatkowe pole pogarsza jakość poprzednich). Każdy etap ma jeden tryb cognitive.
+
+## Dashboard (Streamlit)
+
+Analiza wyników z `final_results/` — porównania, jakość, wall time, sample explorer.
+
+```bash
+# produkcyjnie (jak teraz chodzi)
+streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501
+
+# tryb developerski (auto-reload przy zapisie pliku + szersze logi)
+streamlit run dashboard/main.py \
+  --server.address 0.0.0.0 \
+  --server.port 8501 \
+  --server.runOnSave true \
+  --server.fileWatcherType auto \
+  --logger.level debug
+
+# w tle (tmux — przeżyje rozłączenie SSH)
+tmux new -s dash
+streamlit run dashboard/main.py --server.address 0.0.0.0 --server.port 8501 --server.runOnSave true
+# Ctrl+B D — odłącz; tmux attach -t dash — wróć
+```
+
+Dostęp:
+- lokalnie: `http://localhost:8501`
+- przez WireGuard: `http://10.13.13.5:8501` (wg0) lub `http://10.10.0.3:8501` (wg1)
+
+Restart po zmianie kodu nie jest potrzebny przy `--server.runOnSave true` — Streamlit wykryje zmianę i przeładuje. Jeśli watcher nie łapie zmian (NFS / dziwny mount), użyj `--server.fileWatcherType poll`. Ubicie starej instancji: `pkill -f "streamlit run dashboard/main.py"`.
+
 ## Wynik per encja (Azure NER)
 
 ```json
