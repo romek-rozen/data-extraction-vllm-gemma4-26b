@@ -458,6 +458,66 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 
 ---
 
+### D28: streaming_loader — ProcessPoolExecutor opcja (12× cache warmup speedup, krytyczne dla 26M URL)
+- **Co:** `lib/streaming_loader.py` zyskał parametr `executor_kind: "thread" | "process"`
+  (default `"thread"` dla backward compat). Nowa funkcja module-level `_load_one_core(
+  subdir_str, cache_dir_str, max_article_tokens, text_truncate_limit) → (article|None,
+  stats_delta)` jest picklowalna i może być uruchomiona w ProcessPoolExecutor — każdy
+  worker to niezależny Python interpreter z własnym GIL i własnym lxml. Stats są
+  zwracane jako tuple z każdego call'a i agregowane w parent processie (Counter w child
+  jest niedostępny w parent). Wrapper `stream_articles_async()` przekazuje parametr
+  dalej. `scripts/run_spo_v1_v2_test.py` opt-in domyślnie `executor_kind="process"` +
+  `--loader-workers 16` (saturuje Sparka).
+- **Dlaczego — diagnostyka:**
+  - Spark = 20-rdzeniowy ARM (NVIDIA GB10). Cache warmup z ThreadPool 8w pokazywał
+    `~7/s` zamiast oczekiwanego ~50/s.
+  - py-spy dump 8 workerów `strload_X`: każdy w `lxml.text_content` (C-level) ALE
+    `htop`/`top` showed total ~1.4 cores active across ALL workers.
+  - Wniosek: trafilatura ma **dużo czystego Pythona** (heurystyki boilerplate,
+    `score_paragraphs`, `justext` fallback) — lxml zwalnia GIL przy parsowaniu, ale
+    natychmiast po powrocie do Pythonowych pętli GIL się zamyka i 8 wątków staje się
+    1 wątkiem. ProcessPool eliminuje to — każdy proces ma własny GIL.
+- **Pomiar A/B (200 articles, cold cache, Spark, 23:00 CEST):**
+  | Tryb | Workers | Throughput | Speedup |
+  |---|---|---|---|
+  | ThreadPool | 8 | 18.0/s | 1.0× (baseline) |
+  | ProcessPool | 8 | 52.9/s | 2.9× |
+  | ProcessPool | 16 | 84.1/s | **4.7×** |
+  | ProcessPool | 20 | 83.4/s | 4.6× (saturated) |
+  - Sweet spot na Sparku: 16 workerów. >16 nie skaluje (disk I/O / lxml shared lib).
+- **Konsekwencja dla 26M URL prod (RTX 6000 Pro):**
+  - ThreadPool 8w → 26M / 7/s = **44 dni** tylko warmup.
+  - ProcessPool 16w → 26M / 84/s = **3.6 dnia** (CPU-only, niezależnie od GPU).
+  - **Faktyczny enabler skali:** bez tego refaktoru cache warmup byłby
+    bottleneckiem porównywalnym z LLM inference, kradłby tygodnie.
+- **Koszt:**
+  - **RAM:** ~200-500 MB per worker (fork copy: tokenizer JSON 9 MB + lxml C state
+    + Python interpreter ~30 MB). 16 workerów = 3-8 GB extra. Na RTX 6000 host
+    z 64+ GB akceptowalne; na 32 GB hostach trzeba zejść do 8 workerów (~2 GB).
+  - **Pickle round-trip:** każdy task = serialization paths in + dict out. Mały
+    overhead, w pomiarach niedostrzegalny.
+  - **Cold start workerów:** każdy worker ładuje tokenizer i lxml na pierwszym
+    call'u. ~1-2s na każdy proces × 16 = 30s upfront. Amortyzuje się przy 25k+ tasks.
+- **Alternatywy odrzucone:**
+  - **selectolax** (3-5× szybszy parser HTML niż lxml) — wymagałby przepisania
+    `extract_markdown_from_html_gz` (trafilatura pod spodem używa lxml). Większa
+    zmiana, ryzyko utraty jakości ekstrakcji. Drugi rzut na v4 jeśli ProcessPool
+    nie wystarczy.
+  - **asyncio + aiofiles** dla I/O — trafilatura jest sync, owijanie via thread pool
+    nie pomaga (i tak GIL).
+  - **Native multiprocessing (joblib)** — to samo co ProcessPoolExecutor pod spodem.
+  - **Większa liczba wątków bez ProcessPool** — testowane do 20w, plateau ~1.6 cores.
+- **Backward compat:** default `executor_kind="thread"` dla wszystkich starych callerów
+  (`run_spo_v1.py`, `run_spo_v2.py`, run_pipeline, run_full, etc.). Tylko opt-in
+  `executor_kind="process"` aktywuje nową ścieżkę. Nie psuje runs które nie potrzebują
+  szybkiego warmup (np. resume z hot cache).
+- **Oparte na:** sesja 2026-05-08 21:42-23:00 (cache warmup pomiar v1 bench → diagnostyka
+  py-spy → user proposal ProcessPool → A/B pomiar 100/200 art → refactor → live test).
+- **Status:** zaimplementowane, aktywnie running w master orchestrator (PID po restart o
+  23:01). Pełne 25667 art warmup ETA ~5 min (vs 50 min poprzednio).
+
+---
+
 ## Format dla nowych decyzji
 
 ```markdown
