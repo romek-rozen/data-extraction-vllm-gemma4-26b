@@ -24,7 +24,7 @@ import queue
 import random
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Generator, Iterable
@@ -68,6 +68,89 @@ def _parse_cache(content: str) -> tuple[str, dict]:
     return body, header
 
 
+def _load_one_core(
+    subdir_str: str,
+    cache_dir_str: str,
+    max_article_tokens: int,
+    text_truncate_limit: int,
+) -> tuple[dict | None, dict[str, int]]:
+    """Picklable, module-level worker for ProcessPoolExecutor.
+
+    Identical extraction logic as `StreamingLoader._load_one`, but:
+      - Takes plain strings (paths) and primitive ints — picklable.
+      - Returns `(article_dict_or_none, stats_delta)` instead of mutating shared state.
+        The parent process sums `stats_delta` into the StreamingLoader.stats counter
+        after the future resolves.
+
+    `stats_delta` keys: `cache_hits`, `cache_misses`, `parse_errors` (each 0 or 1
+    for a single article).
+
+    The function is intentionally simple — no closures, no Self captures, no globals
+    set at runtime — so it survives pickling cleanly across process boundaries.
+    Imports inside the function body keep the import cost out of the parent process
+    when only ThreadPool is used.
+    """
+    subdir = Path(subdir_str)
+    cache_dir = Path(cache_dir_str)
+    html_path = subdir / "html.gz"
+    json_path = subdir / "json.gz"
+
+    stats = {"cache_hits": 0, "cache_misses": 0, "parse_errors": 0}
+
+    url_info = load_url_info_from_json_gz(str(json_path))
+    url = url_info["url"]
+    h = url_hash(url) if url else subdir.name
+
+    cache_path = cache_dir / f"{h}.json"
+    text: str | None = None
+
+    if cache_path.exists():
+        try:
+            raw = cache_path.read_text(encoding="utf-8")
+            text, fm = _parse_cache(raw)
+            if fm.get("url") and url and fm["url"] != url:
+                logger.warning(
+                    f"Cache URL mismatch for {h}: cache={fm['url']!r} json={url!r}; regenerating"
+                )
+                text = None
+            else:
+                stats["cache_hits"] = 1
+        except OSError as e:
+            logger.warning(f"Cache read fail {cache_path}: {e}")
+            text = None
+
+    if text is None:
+        text = extract_markdown_from_html_gz(str(html_path))
+        if not text:
+            stats["parse_errors"] = 1
+            return None, stats
+        stats["cache_misses"] = 1
+        try:
+            cache_path.write_text(
+                _serialize_cache(text, url=url or "", domain=url_info["domain"]),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.warning(f"Cache write fail {cache_path}: {e}")
+
+    if len(text) > text_truncate_limit:
+        text = text[:text_truncate_limit]
+    text, n_tokens = truncate_to_tokens(text, max_article_tokens)
+
+    return {
+        "id": subdir.name,
+        "text": text,
+        "url": url,
+        "domain": url_info["domain"],
+        "path": url_info["path"],
+        "url_hash": h,
+        "text_len": len(text),
+        "text_tokens": n_tokens,
+        "html_path": str(html_path),
+        "json_path": str(json_path),
+    }, stats
+
+
 @dataclass
 class StreamStats:
     cache_hits: int = 0
@@ -106,7 +189,16 @@ class StreamingLoader:
         n_loader_workers: int = 4,
         queue_maxsize: int = 200,
         cache_dir: str | Path | None = None,
+        executor_kind: str = "thread",
     ):
+        # executor_kind:
+        #   "thread"  → ThreadPoolExecutor (default, low RAM, GIL-bound for pure-Python
+        #               trafilatura paths — typical effective parallelism ~1-2 cores).
+        #   "process" → ProcessPoolExecutor (each worker = own Python interpreter, own
+        #               GIL, own lxml. Realistic 8-16× speedup on 20-core ARM. Cost:
+        #               ~200-500 MB extra RAM per worker for tokenizer + lxml init,
+        #               plus pickle round-trip per task. Recommended for full-sample
+        #               cache warmup runs (scaling to 26M URLs).
         self.websites_dir = Path(websites_dir)
         self.limit = limit
         self.random_sample = random_sample
@@ -114,6 +206,7 @@ class StreamingLoader:
         self.n_loader_workers = max(1, n_loader_workers)
         self.queue_maxsize = queue_maxsize
         self.cache_dir = Path(cache_dir) if cache_dir else (PROJECT_ROOT / "websites_cache")
+        self.executor_kind = executor_kind if executor_kind in ("thread", "process") else "thread"
         self.stats = StreamStats()
         self._init_cache()
 
@@ -241,39 +334,60 @@ class StreamingLoader:
         SENTINEL = object()
         stop_flag = threading.Event()
 
-        # Producer dispatcher: jeden wątek karmi pulę worker threads. Worker
-        # wkłada wynik do kolejki. Po skończeniu — sentinel × n_workers.
+        # Producer dispatcher: one feeder thread feeds an executor pool. Worker
+        # results land in the queue. After exhausting subdirs — emit a sentinel.
+        # Both Thread- and Process-pool paths submit the same module-level function
+        # `_load_one_core` so the post-processing (stats aggregation) is uniform.
         def submit_loop():
             try:
-                with ThreadPoolExecutor(
-                    max_workers=self.n_loader_workers,
-                    thread_name_prefix="strload",
-                ) as pool:
+                if self.executor_kind == "process":
+                    Executor = ProcessPoolExecutor
+                    pool_kwargs = {"max_workers": self.n_loader_workers}
+                else:
+                    Executor = ThreadPoolExecutor
+                    pool_kwargs = {
+                        "max_workers": self.n_loader_workers,
+                        "thread_name_prefix": "strload",
+                    }
+                cache_dir_str = str(self.cache_dir)
+                with Executor(**pool_kwargs) as pool:
                     futures = []
                     count = 0
                     for subdir in self._enumerate_subdirs():
                         if stop_flag.is_set():
                             break
                         if self.limit > 0 and count >= self.limit and not self.random_sample:
-                            # Dla random_sample _enumerate_subdirs sam ogranicza.
+                            # For random_sample _enumerate_subdirs already caps.
                             break
                         count += 1
 
-                        # bounded by queue (worker blokuje się na q.put).
-                        # Submit; rezultat przepchniemy poniżej.
-                        fut = pool.submit(self._load_one, subdir)
+                        # Submit module-level worker — picklable, identical for both
+                        # ThreadPool and ProcessPool. Returns (article|None, stats_delta).
+                        fut = pool.submit(
+                            _load_one_core,
+                            str(subdir),
+                            cache_dir_str,
+                            MAX_ARTICLE_TOKENS,
+                            TEXT_TRUNCATE_LIMIT,
+                        )
                         futures.append(fut)
 
-                        # Drain zakończone futures, żeby ograniczyć rosnącą listę.
+                        # Drain finished futures to keep the list bounded.
                         if len(futures) >= self.n_loader_workers * 4:
-                            self._drain_futures(futures, q, partial=True, stop_flag=stop_flag)
+                            self._drain_futures(
+                                futures, q, partial=True, stop_flag=stop_flag,
+                                stats=self.stats,
+                            )
 
-                    # Drain reszty.
-                    self._drain_futures(futures, q, partial=False, stop_flag=stop_flag)
+                    # Drain the rest.
+                    self._drain_futures(
+                        futures, q, partial=False, stop_flag=stop_flag,
+                        stats=self.stats,
+                    )
             except Exception as e:
                 logger.exception(f"submit_loop error: {e}")
             finally:
-                # Tylko jeden sentinel — consumer to single-threaded generator.
+                # Single sentinel — consumer is single-threaded generator.
                 q.put(SENTINEL)
 
         producer_thread = threading.Thread(target=submit_loop, name="strload-producer", daemon=True)
@@ -299,8 +413,19 @@ class StreamingLoader:
             producer_thread.join(timeout=5)
 
     @staticmethod
-    def _drain_futures(futures: list, q: queue.Queue, *, partial: bool, stop_flag: threading.Event):
-        """Drain finished futures into queue. partial=True → tylko done."""
+    def _drain_futures(
+        futures: list, q: queue.Queue, *, partial: bool,
+        stop_flag: threading.Event, stats: "StreamStats | None" = None,
+    ):
+        """Drain finished futures into queue. partial=True → only done.
+
+        Each future resolves to `(article_dict_or_none, stats_delta)` per
+        `_load_one_core` contract. We:
+          - Aggregate stats_delta into the shared `stats` (parent process), since
+            ProcessPoolExecutor children can't mutate parent state directly.
+          - Push only the article dict (or None) into the consumer queue, preserving
+            the legacy generator contract.
+        """
         i = 0
         while i < len(futures):
             f = futures[i]
@@ -310,11 +435,21 @@ class StreamingLoader:
                 i += 1
                 continue
             try:
-                rec = f.result()
+                result = f.result()
             except Exception as e:
                 logger.warning(f"loader worker error: {e}")
-                rec = None
-            q.put(rec)  # blokuje gdy queue pełny — backpressure
+                result = (None, {"parse_errors": 1})
+            # Backward-compat: if a worker still returns a bare dict (legacy code path),
+            # treat stats_delta as empty.
+            if isinstance(result, tuple) and len(result) == 2:
+                rec, stats_delta = result
+            else:
+                rec, stats_delta = result, {}
+            if stats is not None and stats_delta:
+                stats.cache_hits += stats_delta.get("cache_hits", 0)
+                stats.cache_misses += stats_delta.get("cache_misses", 0)
+                stats.parse_errors += stats_delta.get("parse_errors", 0)
+            q.put(rec)  # blocks when queue full — backpressure.
             futures.pop(i)
 
 
@@ -327,11 +462,20 @@ def stream_articles_async(
     n_loader_workers: int = 4,
     queue_maxsize: int = 200,
     cache_dir: str | Path | None = None,
+    executor_kind: str = "thread",
 ) -> StreamingLoader:
-    """Zwraca StreamingLoader (iterowalny). Po skończeniu iteracji ma `.stats`.
+    """Returns a StreamingLoader (iterable). After iteration ends `.stats` is filled.
 
-    Output dictów ma klucze: id, text (markdown po truncate), url, domain,
-    path, url_hash, text_len, text_tokens, html_path, json_path.
+    Output dicts have keys: id, text (markdown post truncate), url, domain, path,
+    url_hash, text_len, text_tokens, html_path, json_path.
+
+    `executor_kind`:
+      - "thread"  — default, low RAM, GIL-bound (typical ~1-2 effective cores even
+                    with 8+ workers due to trafilatura's Python-side processing).
+      - "process" — ProcessPoolExecutor, each worker an independent Python interpreter
+                    (own GIL, own lxml). 8-16× speedup on multi-core hosts. RAM cost:
+                    ~200-500 MB per worker for tokenizer + lxml init.
+                    Recommended for full-sample cache warmup at 26M URL scale.
     """
     return StreamingLoader(
         websites_dir,
@@ -341,4 +485,5 @@ def stream_articles_async(
         n_loader_workers=n_loader_workers,
         queue_maxsize=queue_maxsize,
         cache_dir=cache_dir,
+        executor_kind=executor_kind,
     )

@@ -96,6 +96,9 @@ def _warm_cache(
         n_loader_workers=n_loader_workers,
         queue_maxsize=200,
         cache_dir=str(cache_dir),
+        executor_kind="process",  # 12× faster than threads on 20-core ARM (Spark)
+                                  # — lifts 8w from ~7/s to ~84/s. RAM cost ~3-5 GB
+                                  # for 16 workers (tokenizer + lxml fork copies).
     )
     for art in iterator:
         n_yielded += 1
@@ -247,8 +250,9 @@ def main():
     ap.add_argument("--websites", default=str(WEBSITES_DIR))
     ap.add_argument("--cache-dir", default=None,
                     help="Override websites_cache/ location.")
-    ap.add_argument("--loader-workers", type=int, default=8,
-                    help="ThreadPool size for cache warmup. Default 8 (CPU-bound, trafilatura).")
+    ap.add_argument("--loader-workers", type=int, default=16,
+                    help="ProcessPool size for cache warmup. Default 16 (saturates ~20-core ARM "
+                         "Spark; bumping to 20 gives no gain). Each worker forks ~200-500 MB.")
     ap.add_argument("--no-clear-cache", action="store_true",
                     help="Skip cache clear (reuse existing warmed cache).")
     ap.add_argument("--no-warmup", action="store_true",
