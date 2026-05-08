@@ -24,7 +24,11 @@ Return ONLY a valid JSON object matching the schema. No markdown, no extra text.
 
 - `full_sponsored` — entire article is an ad for one external brand (different from publisher). Often (not always) has a disclaimer like "artykuł sponsorowany", "wpis sponsorowany", "sponsored content", "advertorial", "brought to you by", "in collaboration with".
 - `link_insertion` — article on some unrelated topic with one or more commercial links to EXTERNAL domain(s) inserted, possibly seamlessly (semantic-fitting paragraph). May involve multiple advertisers in one article. NO disclaimer in most cases.
-- `brand_mentions` — article mentions an EXTERNAL brand multiple times in positive context but WITHOUT active links (mention-only ads — newer pattern in PL market, used for regulated industries like medical or finance, or for brand awareness). Hard to detect — looks organic.
+- `brand_mentions` — article mentions an EXTERNAL brand **at least 2 times in positive context within a SINGLE coherent article body** but WITHOUT active links. Mention-only ads (newer pattern in PL market, used for regulated industries like medical or finance, or for brand awareness). CRITICAL CONSTRAINTS:
+  - SAME brand repeated 2+ times in SAME single article body (not spread across multi-article snippets).
+  - Positive context throughout (recommend, "warto wybrać", "renomowany", "godny zaufania", "wyróżnia się").
+  - No comparison to competitors (single-brand focus is the giveaway).
+  - **NOTE on hidden 1-mention paid placements**: in reality, advertisers do pay for single mentions hidden in articles ("artykuł z 1 wzmianką BrandX"). These are nearly indistinguishable from organic mentions and we DO NOT flag them — false-positive cost (flagging genuine editorial as sponsored) outweighs recall on hidden placements. Threshold 2+ is precision-focused for 21M-scale classification. Single-mention sponsored exists but goes undetected by design.
 - `advertorial` — sponsored content disguised as editorial article with blurred boundary between commercial and editorial, paid by external party.
 
 **Editorial cases (NOT sponsored):**
@@ -185,6 +189,20 @@ OUTPUT:
   "sponsored_justification": "explicit '[Informacje prasowe]' tag + single product promotion + CTA, classic press placement"
 }
 ```
+
+### Example 10b — multi-article aggregation page (sponsored=false, anti-pattern)
+PUBLISHER DOMAIN: biznews.com.pl
+INPUT: "## Pompa ciepła — co warto wiedzieć\nKrótki opis trzyzdaniowy o pompach. Firma WIERTPOL oferuje montaż.\n## Fotowoltaika 2024\nDrugi opis o panelach.\n## Remonty łazienek — top trendy\nTrzeci opis."
+NOTE: This is a paginated category listing (`?start=114`) with 3+ distinct snippets from different articles. Each snippet may mention a brand 1× but they are different brands across different topics — NOT a coherent article promoting one brand.
+OUTPUT:
+```json
+{
+  "sponsored": false,
+  "sponsored_subtype": null,
+  "sponsored_justification": "multi-article aggregation page with snippets from different articles, no single-brand promotion in coherent article body"
+}
+```
+(Such pages should ideally be caught by junk classifier, but if they reach sponsored stage, return false — different brands across different snippets is NOT sponsored.)
 
 ### Example 10 — single-product article without disclaimer (sponsored=false, conservative)
 PUBLISHER DOMAIN: techportal.pl

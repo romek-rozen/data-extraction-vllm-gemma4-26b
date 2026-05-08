@@ -1,17 +1,14 @@
 # Dane wejściowe (lokalne, nie commitować)
 websites/
+websites_*/
+websites_new/
 
 # Wyniki eksperymentów (lokalne)
 result/
 final_result/
-final_result_v6/
-final_result_v6_b/
+final_result*/
 final_results/
 benchmark_results/
-
-# Scraper output (lokalne) — wszystkie websites_<name>/ folders
-websites_new/
-websites_*/
 scraper_logs/
 
 # Python
@@ -26,7 +23,7 @@ venv/
 .env
 .env.local
 
-# Modele (zawsze poza repo)
+# Modele (zawsze poza repo, duże pliki)
 models/
 *.safetensors
 *.gguf
@@ -37,8 +34,9 @@ models/
 *.swp
 .DS_Store
 
-# Logi
+# Logi (per-stage logi pipeline'u są w final_results/* więc i tak ignorowane,
+# ale na wypadek gdyby ktoś zapisał log w repo root)
 *.log
 
-# Claude Code lokalne
+# Claude Code lokalne (settings, sessions)
 .claude/
