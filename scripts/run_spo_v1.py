@@ -269,7 +269,9 @@ def main():
             meta_rec = s["meta"]
             spon_rec = s["sponsored"]
             state.pop(h, None)
-        final = join_final_spo(article, classify_rec, ent_rec, meta_rec, spon_rec)
+        # v3 join: spo_v1 cram → triples carried inside ent_rec, no separate spo_rec.
+        final = join_final_spo(article, classify_rec, ent_rec, spo_record=None,
+                               meta_record=meta_rec, sponsored_record=spon_rec)
         rep_final.append(final)
         bump("final_ok" if final["ok"] else "final_fail")
         if final.get("sponsored"):
