@@ -441,9 +441,37 @@ Sample dominują biznews.com.pl (627/1000 = 64% próbki, sponsored 89.5%). Bez t
 
 ### Pełen run v4_1000_v2_1 (prompt v2.1 — URL signals + head+tail)
 
-W trakcie. Wstępne sygnały: junk **~17%** (vs 2.2% w v4_1000) — URL signals łapią paginowane kategorie i tag pages. Eyeball 8 random junków: **8/8 true positives**, zero false positives.
+`final_results/2026-05-08_15-53-53__fourstep_v1_v4_1000_v2_1/`
 
-Liczby finalne do uzupełnienia.
+| Metryka | v4_1000 (v2.0) | **v4_1000_v2_1** (v2.1) | Delta |
+|---|---|---|---|
+| Wall | 4213 s | **3897 s** | **−7.5%** szybciej |
+| Throughput | 854 URL/h | **924 URL/h** | **+8.2%** |
+| s/URL | 4.21 | 3.90 | −7.4% |
+| Junk classified | 22 (2.20%) | **166 (16.60%)** | **+7.5×** więcej junku wykrytego |
+| Sponsored | 577/978 (59.0%) | 539/834 (64.6% non-junk) | wyższe (mniej szumu z listingów) |
+| Fail rate | 0% | **0%** | równe |
+
+**Eyeball 8 random junków**: 8/8 true positives, zero false positives — URL signals działają precyzyjnie.
+
+**Per-domain breakdown (>=3 URL):**
+
+| Domena | Total | Junk% | Non-junk | Sponsored% |
+|---|---|---|---|---|
+| biznews.com.pl | 633 | 10.9% | 564 | **92.6%** (522/564) |
+| pomocedlaseniora.pl | 127 | **59.8%** | 51 | 0.0% (0/51) |
+| webporadnik.pl | 120 | 8.3% | 110 | 7.3% |
+| graniteks.pl | 52 | 3.8% | 50 | 2.0% |
+| cmomega.pl | 19 | 0% | 19 | 0% |
+| intymnehistorie.pl | 12 | 41.7% | 7 | 14.3% |
+| naturanatalerzu.pl | 12 | 8.3% | 11 | 54.5% |
+| artystyczna.pl | 12 | 0% | 12 | 0% |
+| folkowa.art.pl | 9 | 33.3% | 6 | 0% |
+
+Najciekawsze odkrycia:
+- **pomocedlaseniora.pl 59.8% junk** — większość ich `/blog/tag/...` pages teraz wycięte; pozostałe 51 prawdziwych artykułów = 100% owner-commercial editorial (zero sponsored).
+- **biznews.com.pl 92.6% sponsored** (vs 89.5% w v2.0) — content farm bez listingów jeszcze wyraźniejszy.
+- Junk-skip oszczędził **~70 min GPU time** (166 × ~25s × 3 fazy / 6 workerów).
 
 ---
 
