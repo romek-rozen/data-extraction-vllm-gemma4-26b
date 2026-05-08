@@ -8,7 +8,6 @@
     },
     "central_entities": {
       "type": "array",
-      "maxItems": 5,
       "items": {
         "type": "object",
         "properties": {
@@ -21,7 +20,6 @@
     },
     "triples": {
       "type": "array",
-      "maxItems": 40,
       "items": {
         "type": "object",
         "properties": {

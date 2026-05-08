@@ -382,6 +382,82 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 
 ---
 
+### D26: v3 schemas — `maxItems` removed (no arbitrary cap on entities/triples)
+- **Co:** Z `prompts/spo_schema_v3.json` i `prompts/spo_pipe_v3_schema.json` usunięte
+  pola `maxItems` z arrays: `entities` (było 60), `central_entities` (było 5), `triples`
+  (było 40). Pozostawione tylko `maxLength` na stringach (200/100/300/500 zależnie od pola).
+- **Dlaczego:** Capy 60/5/40 były ostrożnym estymatem dla bootstrap, NIE pochodziły
+  z żadnego pomiaru. Zauważone że:
+  - 60 entities — w smokes obserwowane do 30; dla list-pages (e.g. catalogs) mogłoby być
+    realne 80-100 jeśli artykuł wymienia produkty. Cap arbitralnie ucinał.
+  - 5 central_entities — większość smokes miała 1-3, więc to ok, ale dla complex articles
+    może być realnie 6-7. Niech model sam zdecyduje.
+  - 40 triples — w smokes zwykle 8-25. Edge cases (długie artykuły z wieloma faktami)
+    mogłoby być 60+. Cap blokował high-recall ekstrakcję.
+  - **xgrammar i tak ma natural cap:** `max_tokens` request-budget (4500 v1 / 4200 v2)
+    + `max-model-len 24576` zatrzyma generację. Plus prompt mówi "be concise".
+- **Konsekwencje:**
+  - Lepszy harvest predykatów dla v4 (więcej długo-ogonowych predicates uchwyconych).
+  - Marginalnie wyższy token cost dla outlierów (rare cases z 60+ triples), ale
+    nie regresuje na common cases (model i tak emit ~20-30 dla artykułów).
+  - **Trzeba monitorować** w bench wyniku: pojawiające się outliery z 80+ triples mogą
+    wskazywać że model "wymyśla" triples bez evidence — w v4 może wrócić rozsądniejsze
+    capy bazując na empirycznym rozkładzie p99 (np. 80 entities, 60 triples).
+- **Alternatywy odrzucone:**
+  - **Zostawić capy** — bootstrap = chcemy zobaczyć naturalny rozkład bez ograniczeń;
+    capy psują dane do podjęcia v4 decyzji.
+  - **Cap = max_model_len/max_tokens implicit** — to się dzieje i tak, nie potrzeba
+    duplikatu w schemacie.
+- **Oparte na:** Cząstkowy bench v1 1000 art (354 final.jsonl) — top entities count
+  per article p50=5, p95=18, max=30 (daleko od capa 60). Triples p50=7, p95=20, max=24
+  (daleko od capa 40). Capy nigdy nie aktywowały się w cząstkowych pomiarach, ale dla
+  bootstrap > pewności uzyskania pełnego sygnału z modelu.
+- **Status:** zaimplementowane (user edit), wchodzi do pełnego runa parallel.
+
+---
+
+### D27: SPO v3 full run — parallel v1+v2 z osobno mierzonym cache pre-gen
+- **Co:** Pełen run SPO v3 na 25667 artykułów = oba pipeline'y v1 (cram) i v2 (split)
+  uruchomione **równolegle** jako subprocess'y w jednym orchestratorze
+  (`scripts/run_spo_v1_v2_test.py`), każdy z `--concurrency 4` (suma = 8 inflight, sweet
+  spot vLLM na Sparku). Cache HTML→markdown **pre-generowany przed runami** w osobnym
+  etapie z osobnym pomiarem czasu (`cache_warmup_meta.json`). Cache współdzielony
+  (websites_cache/, oba runy czytają z tego samego katalogu, żaden nie pisze nowych
+  po cache_warmup).
+- **Dlaczego:**
+  - **Apples-to-apples comparison v1 vs v2:** identical wall window, identyczny stan
+    cache, identyczny GPU contention. Sekwencyjne runy (v1 najpierw, v2 potem) byłyby
+    dokładniejsze per-run, ale różniłyby się stanem (cache warmup, GPU thermals, possible
+    drift w vLLM stats). Parallel = jedna powtórka = więcej wniosków.
+  - **Cache gen osobno:** 25667 art × ~50ms trafilatura = ~21 min single-thread, ~3 min
+    8-thread. To **CPU-bound koszt**, nie GPU-bound. Dla ekstrapolacji ETA na RTX 6000 Pro
+    (gdzie GPU jest ~3-5× szybsze, ale CPU ten sam) ten koszt **zostaje stały**, więc
+    musimy wiedzieć ile go jest.
+  - **8 total inflight = 4+4** zamiast sekwencyjnego conc=8: jeśli scheduler vLLM
+    optymalnie miksuje requesty, parallel powinno być bliskie sekwencji. Jeśli nie — to
+    też informacja (overhead schedulera).
+- **Konsekwencje:**
+  - **Pomiary wall-time per pipeline będą zaszumione** przez współdzielenie GPU. Dla
+    deklaracji "v1 jest X% szybszy od v2" trzeba albo ekstrapolować z n=10 smoke
+    (gdzie wall jest czyste) albo rerunąć sekwencyjnie. Akceptujemy szum w zamian za
+    równoległą obserwację (junk %, sponsored %, predykaty).
+  - **Wall sum (cache gen + parallel runs)** to ~3 min + 60-90h LLM (na podstawie
+    smoke: ~10s/URL × 25667 / 8 conc × 2 pipelines / 8 conc shared = ~70h).
+  - **Run dirs:** `final_results/<ts>__spo_v1_test_full` i `<ts>__spo_v2_test_full`
+    + master dir `final_results/<ts>__spo_v1_v2_test/` z `cache_warmup_meta.json`
+    i `comparison_report.md`.
+- **Alternatywy odrzucone:**
+  - **Sekwencyjne v1 → v2 → full:** czyste wall-time, ale 2× dłużej before user widzi
+    cokolwiek użytecznego. Plus dwa skoki cold-cache (chyba że dzielą cache, co wymaga
+    re-runa pierwszego z `--cache-dir` shared).
+  - **Tylko v2 (split) na full** bez v1 — pomijamy cram timing comparison na realnej
+    próbce. Ale spo_v2 i tak ma być default per smoke wyniki.
+- **Oparte na:** smoke n=10 seed=42 (v1 9.4s/URL 8.75 triples/art, v2 13.3s/URL 11.88
+  triples/art, oba parse_errors=0). Cząstkowy bench v1 354 art potwierdza pipeline OK.
+- **Status:** zaimplementowane (orchestrator + run_meta serialization), launching.
+
+---
+
 ## Format dla nowych decyzji
 
 ```markdown

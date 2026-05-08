@@ -2,6 +2,43 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-09 (rano) — SPO v3 full parallel A/B + maxItems removed
+
+**Zmiana planu po cząstkowym benchu v1 (354/1000):**
+- 1000-art bench v1+v2 ANULOWANY (cząstkowe wyniki potwierdziły pipeline działa,
+  parse_errors=0, triples sensowne — wystarczy by przejść do full).
+- Idziemy bezpośrednio na full sample (25667 art) z OBU pipeline'ami w PARALLEL,
+  każdy `--concurrency 4` (suma = 8 inflight, sweet spot vLLM Sparka).
+
+**Schema fix (`prompts/spo_schema_v3.json` + `prompts/spo_pipe_v3_schema.json`):**
+- `maxItems` usunięte z `entities` (było 60), `central_entities` (było 5),
+  `triples` (było 40). Capy były arbitralne, model i tak ma `max_tokens` jako natural
+  cap. Decyzja D26.
+
+**Nowy orchestrator (`scripts/run_spo_v1_v2_test.py`):**
+- Stage 1: clear `websites_cache/`.
+- Stage 2: pre-warm cache (parallel ThreadPool, 8 workers, 25667 art) z osobnym pomiarem
+  czasu w `cache_warmup_meta.json`. Trafilatura HTML→markdown to CPU-bound koszt
+  (niezależny od GPU), mierzymy go osobno dla ekstrapolacji ETA na RTX 6000 Pro.
+- Stage 3: launch v1 (cram) + v2 (split) jako subprocess'y, oba `--concurrency 4`,
+  oba `--limit 0 --random --seed 42`. Cache współdzielony (read-only po warmupie).
+- Stage 4: czeka na oba, generuje comparison report.
+
+**Pliki:**
+- `scripts/run_spo_v1_v2_test.py` (nowy)
+- `PLANS/spo_v3_full_parallel_plan.md` (nowy)
+- `DECISIONS.md`: D26 (maxItems removed) + D27 (parallel run + cache gen separate).
+- Aktualizacja CHANGELOG.
+
+**Cele runa:**
+- Junk % na realnej PL/multi-language próbce.
+- Sponsored % (paid_placement + brand_mentions + advertorial dist).
+- Predykaty — harvest 250-500k triples × `relation_type` + `predicate_phrase` distribution
+  do wyboru closed enum w v4 (`PLANS/spo_predicate_refinement_plan.md`).
+- ETA scaling na RTX 6000 Pro (GPU ~3-5× szybciej, CPU cache gen stały).
+
+---
+
 ## 2026-05-08 (noc) — SPO v3 rich-JSON (replace pipe format)
 
 **Motywacja:** v2 pipe format (`s|p|o\n`) miał 2-7% parse errors mimo dwóch iteracji wzmacniania
