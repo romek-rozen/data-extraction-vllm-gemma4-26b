@@ -286,6 +286,102 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 
 ---
 
+### D23: spo_pipe format switch — pipe → rich JSON (xgrammar guided_json)
+- **Co:** v2 spo_pipe format `s|p|o\n` per linia ZASTĄPIONY przez JSON object enforced via
+  `response_format: json_schema` w xgrammar. Top-level: `primary_topic` (string),
+  `central_entities[]` (array, primary/secondary), `triples[]` (array of 9-field objects).
+  Plik: `prompts/spo_pipe_v3_schema.json`, `prompts/spo_pipe_v3_system.md`,
+  `lib/spo_pipeline_v3.py:process_spo_pipe_v3`.
+- **Dlaczego:** Pipe format miał 2-7% parse errors w smokes:
+  - **Extra-pipe** (>3 segmenty): `lody waniliowe|stored in|lodówka|at least|4 godziny` —
+    model wstawiał `|` jako separator dla qualifierów (5 segm., 4 pipes).
+  - **Missing-pipe** (<3 segmenty): `Badanie UFL|is non-invasive` — model kleił predykat
+    z obiektem (2 segm., 1 pipe).
+  Dwie iteracje wzmocnienia promptu (explicit WRONG/RIGHT examples, "exactly two `|` per line"
+  self-check) zredukowały ale nie wyeliminowały. xgrammar enforced JSON ⇒ structural validity
+  100% z definicji — nie polegamy na samodyscyplinie modelu.
+- **Alternatywy odrzucone:**
+  - **Auto-correction loop** (model retry-with-feedback gdy parser failed) — droższe (2× tokens
+    per artykuł w worst case), niepewny success rate, dodaje state machine do orkiestracji.
+  - **Bardziej rygorystyczny pipe parser** (akceptuj 4-tuples, split na 2 triples) — heuristic,
+    łamie semantic, debug nightmare przy 21M URL.
+  - **Plain JSON bez schema enforcement** (model "free-form" JSON parsed po fakcie) — wraca
+    do tej samej klasy parse errors (model emit malformed JSON, brakujące cudzysłowy, trailing
+    przecinki). xgrammar guided_json eliminuje to z poziomu generation.
+- **Konsekwencje:**
+  - **0% parse errors** w smokes v3 (n=20, seed=42 i 999, oba pipeline'y).
+  - **+2× tokens output** vs pipe (rich JSON jest verbose). Mitigacja: `enable_prefix_caching`
+    cache'uje ~10kB system prompt; per-request input narzut akceptowalny.
+  - **+7 pól per triple** (subject_type, relation_type, predicate_phrase, object_type,
+    object_kind, evidence_span, confidence) — bogatsza struktura dla downstream:
+    type-aware aggregation, audit trail (evidence_span), confidence filtering.
+- **Oparte na:** Smoke runs `final_results/2026-05-08_20-{45,47,48,49,50,51}-*__spo_v{1,2}_smoke_*`
+  (pipe format z parse errors) + smokes v3 `final_results/2026-05-08_21-3{5,6,7,8,9}-*__spo_v{1,2}_v3_smoke_*` (rich JSON, parse_errors=0).
+- **Status:** zaimplementowane, smoke OK, bench 1000 art (seed=42, oba pipeline'y) w toku.
+
+---
+
+### D24: SPO `relation_type` zostaje FREEFORM string w v3 (closed enum dopiero w v4)
+- **Co:** W v3 schema (`spo_pipe_v3_schema.json` i `spo_schema_v3.json`) pole
+  `relation_type` ma typ `{"type": "string", "maxLength": 50}` BEZ `enum: [...]`.
+  Model emit dowolne snake_case English strings (hint w prompcie, lista przykładów).
+- **Dlaczego:** Bootstrap. Wstępne smoke pipe format na 8 artykułach zwróciło 251 unikalnych
+  predykatów (eksplozja synonimów: `is in / located in / lives in / is from / headquartered in`,
+  niespójność kierunku `available in` vs `offers`, atrybuty udające relacje `has hex code`).
+  Zamknięcie enum bez empirycznych danych z większej próbki = ryzyko wybrania źle dobranych
+  predykatów (za mało coverage / za dużo overlap). Strategia: pozwolić modelowi swobodę na
+  bench 1000 art × oba pipeline'y → harvest rozkładu → wybór finalnego enum w v4 z mappingami
+  schema.org / ConceptNet / Wikidata.
+- **Alternatywy odrzucone:**
+  - **Closed enum od razu** (np. 28 predykatów schema.org-aligned) — bez danych empirycznych
+    nie wiemy czy 28 to dobry granular cut-off, ani które predykaty są realnie używane przez
+    model na PL/EN/multi-language artykułach SEO.
+  - **Wikidata P-numbers (P31, P279, ...)** — 2719 properties, kompilacja xgrammar zżera
+    pamięć/czas; nazwy nieczytelne dla LLM w few-shot examples → degradacja jakości.
+- **Konsekwencje:**
+  - Bench v3 da nam realny rozkład `relation_type` z modelu (Gemma 4 26B A4B na PL+EN+...).
+  - Po benchu: skrypt analizujący rozkład + mapping synonimów + wybór finalnego enum
+    (~25-30 predykatów) → v4 schemas + prompts + closed enum w xgrammar.
+  - Plan kontynuacji w `PLANS/spo_predicate_refinement_plan.md`.
+- **Oparte na:** Wstępna analiza 251 unique predicates z poprzednich smokes (drugi Claude
+  zrobił agregację per-seed, identyfikacja synonim clusters: `contains/includes/has`,
+  `located_in/is_in/lives_in/is_from`, `provides/offers/provides_for`).
+- **Status:** zaimplementowane (freeform string), enum decision DEFERRED do v4.
+
+---
+
+### D25: spo_v1 cram vs spo_v2 split — A/B benchmark, decyzja PRELIMINARILY split
+- **Co:** Dwa kandydatami architektury dla SPO w rich-JSON v3:
+  - **spo_v1 cram** (`run_spo_v1.py` + `process_entities_spo_v3`): single LLM call ekstrahuje
+    encje + emit rich SPO triples. Schema: `spo_schema_v3.json` z `entities[]` + `triples[]`
+    razem.
+  - **spo_v2 split** (`run_spo_v2.py` + `process_entities_only_v2` + `process_spo_pipe_v3`):
+    dwa osobne calle — najpierw `entities_only` (minimalny schema name+type+is_central),
+    potem `spo_pipe` z encjami w prompcie i osobnym schema na rich SPO.
+- **Dlaczego rozważamy oba:**
+  - Cram ma 1 LLM call zamiast 2 → ~30-50% szybciej wall-time per artykuł.
+  - Split ma dedicated attention dla każdego stepu → potencjalnie wyższa jakość encji
+    (model nie musi balansować dwóch zadań w jednym prompcie) i wyższa precyzja triples
+    (encje wstrzykiwane w prompt jako hard constraint dla subjects/objects).
+- **Pre-bench smoke (n=10, seed=42, conc=8, cold cache):**
+  | Pipeline | wall (s) | s/URL | triples/art | s_unmatched | parse_err |
+  |---|---|---|---|---|---|
+  | v1 cram | 93.7 | 9.37 | 8.75 | 4.29% | 0 |
+  | v2 split | 133.4 | 13.34 | **11.88** | **2.11%** | 0 |
+  - v2 split: +35% triples, -50% s_unmatched (lepsza jakość matchowania), +42% wall.
+- **Decyzja preliminary:** v2 split → pełen run docelowy. Wall-time +42% akceptowalne kosztem
+  wyższej jakości na knowledge graph z 21M URL (jakość matchowania subject-do-entity
+  krytyczna dla cross-article aggregation; im niższy s_unmatched tym mniej szumu w grafie).
+- **Final decision:** PO benchu 1000 art, sekcja "## Bench results" w
+  `SESSIONS_SUMMARY/2026-05-08_spo_rich_json.md`. Jeśli różnica w jakości potwierdzi się
+  na 1000 art (a nie tylko 10), v2 wygrywa.
+- **Konsekwencja dla prod (RTX 6000 Pro / 21M URL):** Wybór architektury wpływa na ETA.
+  Spark wall-time × scaling factor → szacunek ETA RTX 6000 Pro. Wybór sequential (nie
+  parallel) z `--concurrency 8` jako sweet spot Sparka (8+ workers dławi się na MoE marlin).
+- **Status:** smoke OK (rich JSON działa w obu, parse_errors=0), bench 1000 art w toku.
+
+---
+
 ## Format dla nowych decyzji
 
 ```markdown

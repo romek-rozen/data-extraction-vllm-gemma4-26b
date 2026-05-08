@@ -2,6 +2,59 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-08 (noc) — SPO v3 rich-JSON (replace pipe format)
+
+**Motywacja:** v2 pipe format (`s|p|o\n`) miał 2-7% parse errors mimo dwóch iteracji wzmacniania
+promptu (extra-pipe qualifiers `lody waniliowe|stored in|lodówka|at least|4 godziny`,
+missing-pipe glue `Badanie UFL|is non-invasive`). Decyzja: switch na JSON wymuszany przez
+xgrammar (`response_format: json_schema`) → strukturalna poprawność = 100%.
+
+**Rich JSON schema** (D24, D25):
+- `primary_topic` (string) — syntetyczny hyperonim, może być spoza entities list.
+- `central_entities[]` — 1-5 encji z gradacją `primary`/`secondary` (silniejszy sygnał niż
+  boolean `is_central`).
+- `triples[]` — 9 wymaganych pól per triple:
+  `subject`, `subject_type` (Azure NER 51-enum),
+  `relation_type` (snake_case English, **freeform w v3 — bootstrap, enum dopiero w v4**),
+  `predicate_phrase` (article-language natural verb phrase, backup gdy relation_type coarse),
+  `object`, `object_type`, `object_kind ∈ {entity, literal}`,
+  `evidence_span` (verbatim fragment z artykułu — audit trail), `confidence` (0-1).
+
+**Pliki nowe:**
+- `prompts/spo_pipe_v3_schema.json` + `prompts/spo_pipe_v3_system.md` — split-call dla spo_v2.
+- `prompts/spo_schema_v3.json` + `prompts/spo_entities_v3_system.md` — single-call cram dla spo_v1.
+- `lib/spo_pipeline_v3.py` — `process_entities_spo_v3`, `process_spo_pipe_v3`, `join_final_v3`,
+  helpers (`_normalize_rich_triple`, `_dedup_rich_triples`, `_validate_triples_against_entities`).
+- `PLANS/spo_rich_json_v3_plan.md` — plan implementacji + benchmark plan.
+- `PLANS/spo_predicate_refinement_plan.md` — TODO dla v4 (closed enum po harvescie).
+- `SESSIONS_SUMMARY/2026-05-08_spo_rich_json.md` — pełne podsumowanie sesji.
+
+**Pliki edytowane (orkiestratory):**
+- `scripts/run_spo_v1.py` — load v3 prompts/schemas, max_tokens 4500, spo_raw.txt jako JSON-per-line.
+- `scripts/run_spo_v2.py` — load v3 prompts/schemas, max_tokens 4200 (`MAX_TOKENS_SPO_PIPE_V3`).
+
+**Pliki zachowane (deprecated, dla A/B reference):**
+- `prompts/spo_pipe_v2_system.md` (pipe format).
+- `prompts/spo_schema_v1.json` (basic s/p/o).
+- `prompts/spo_entities_v1_system.md`.
+- `lib/spo_pipeline_v1.py`, `lib/spo_pipeline_v2.py` (re-eksportowane przez v3 dla helperów).
+
+**Pre-bench smoke (10 art, seed=42, conc=8, cold cache):**
+| Pipeline | wall | triples/art | s_unm% | parse_err |
+|---|---|---|---|---|
+| v1 cram | 93.7s | 8.75 | 4.29% | 0 |
+| v2 split | 133.4s (+42%) | 11.88 (+35%) | 2.11% | 0 |
+
+Zero parse errors w obu (xgrammar). v2 więcej triples + lepszy s match, ale wolniejszy.
+
+**Commits:** `8140c60` (v3 implementation), `b98fcc5` (lib helpers prereq), `8a8c7c2` (v1 join args fix).
+
+**Następnie (this session, autonomous):** bench v1 1000 art seed=42, bench v2 1000 art seed=42,
+porównanie, pełen run zwycięzcy na 25667 art. Cache czyszczone przed każdym (mierzymy też
+trafilatura cold time).
+
+---
+
 ## 2026-05-08 (późny wieczór) — SPO pipeline fix: drain-first scheduling + rich entity context
 
 **Worker starvation fix (v1 + v2):**
