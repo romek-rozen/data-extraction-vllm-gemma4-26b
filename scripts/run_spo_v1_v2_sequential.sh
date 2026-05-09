@@ -26,7 +26,7 @@ REPO=/home/spark001/Spark-testy/mateusz-g-two-step-vllm
 cd "$REPO" || exit 99
 
 LIMIT=${LIMIT:-0}
-CONC=${CONC:-8}
+CONC=${CONC:-32}
 TAG=${TAG:-v3_seq}
 SEED=${SEED:-42}
 

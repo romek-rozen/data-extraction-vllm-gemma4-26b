@@ -61,11 +61,13 @@ docker run -d --gpus all --ipc=host \
   --model /model \
   --quantization modelopt \
   --kv-cache-dtype fp8 \
-  --max-model-len 32768 \
-  --max-num-seqs 8 \
-  --gpu-memory-utilization 0.75 \
+  --max-model-len 24576 \
+  --max-num-seqs 32 \
+  --max-num-batched-tokens 16384 \
+  --gpu-memory-utilization 0.85 \
   --moe-backend marlin \
   --enable-prefix-caching \
+  --enable-chunked-prefill \
   --default-chat-template-kwargs '{"enable_thinking": false}'
 
 cat <<EOF
