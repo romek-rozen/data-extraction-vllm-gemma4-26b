@@ -2,6 +2,39 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-11 (12:30) — v1 vs v2 comparison na pełnym cache + Qwen3-Embedding setup
+
+**SPO v1 vs v2 — porównanie 1:1 na 15 730 wspólnych URL** (z 25 668 z `websites_cache/`).
+v2 zabite po ~56% (24h), v1 ma pełen run 25 667 URL (34h14min) — wystarczająco do porównania.
+- v1 jest **15.2% szybsze** (4.80 vs 5.53 s/URL) — jeden LLM call entities+spo vs dwa.
+- Jakość **równoważna** dla łatwych metryk (≥98.3% agreement na junk/lang/sponsored/meta).
+- Entities Jaccard mean **0.47**, triples Jaccard mean **0.10** — duża wariantywność
+  triples na poziomie surface form. Wymaga LLM-judge eval żeby ocenić semantycznie.
+- `final_results/2026-05-11_11-34-30__compare_v1_vs_v2/{joined.jsonl, report.md}`.
+- Decyzja preliminary: v1 jako default (override D25) — `DECISIONS.md` D29.
+
+**Rozkład 51 typów Azure NER na pełnym v1** (22 582 non-junk, 281 167 encji):
+- 71.64% strong / 28.36% weak. Top 4 kategorie = 76.9% (Product 40.7%, Information
+  13.4%, Location 11.7%, Organization 11.0%). 14 typów <0.1% — kandydaci do filtrowania
+  w embedding/clustering.
+
+**Setup Qwen3-Embedding-4B na DGX Spark** dla HDBSCAN clusteringu — `DECISIONS.md` D30.
+- `scripts/start_vllm_llm_plus_embedding.py` — dual-container orchestrator:
+  Gemma `:8001` GPU_MEM=0.60 + Qwen embed `:8002` GPU_MEM=0.20 (suma 0.80 z 121 GB
+  unified). Health-wait polling na `/v1/models`, drukuje `[OK]` po starcie.
+- `scripts/embed_articles.py` — klient `/v1/embeddings`, idempotencja po url_hash,
+  doc_text format: `{h1}\n{summary}\n{strong ∪ central entities deduped}`.
+- bf16, nie NVFP4 — embeddery nie mają NVFP4, i tak by nie przyspieszyło (memory-bound).
+- 4B nie 8B — MTEB różnica nieistotna dla 22k krótkich doc'ów, 2× szybsze, mieści
+  się obok Gemmy bez restartu.
+
+**Nowe pliki:**
+- `scripts/compare_v1_vs_v2.py`, `scripts/embed_articles.py`
+- `scripts/start_vllm_llm_plus_embedding.py` (orchestrator dwóch kontenerów; user
+  poprosił o rozszerzenie `.py` mimo że to bash — wewnątrz `#!/usr/bin/env bash`)
+
+`scripts/start_vllm.sh` — **niezmieniony**, solo-mode dla Gemmy (GPU_MEM=0.85).
+
 ## 2026-05-08 (późna noc, 23:08) — Cache portability Spark→prod + 64w benchmark
 
 **Test 64 workers ProcessPool** (po refaktorze D28):

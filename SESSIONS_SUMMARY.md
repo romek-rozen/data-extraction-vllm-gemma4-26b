@@ -12,6 +12,7 @@
 | 2026-05-07 | [`SESSIONS_SUMMARY/2026-05-07_v6_100pct_and_scraper.md`](./SESSIONS_SUMMARY/2026-05-07_v6_100pct_and_scraper.md) | Phase 5 v6 — 100% reliability + crawl4ai scraper |
 | 2026-05-07 | [`SESSIONS_SUMMARY/2026-05-07_resume_context_overflow_junkey.md`](./SESSIONS_SUMMARY/2026-05-07_resume_context_overflow_junkey.md) | Resume-after-context-overflow + junkey kategoria |
 | 2026-05-08 | [`SESSIONS_SUMMARY/2026-05-08_threestep_fourstep_sponsored_scrapers.md`](./SESSIONS_SUMMARY/2026-05-08_threestep_fourstep_sponsored_scrapers.md) | Three-step v1/v2/v3 + Four-step v4 sponsored detection + scrapery (intymnehistorie, exposilesia) + robots.txt + Content-Type filter |
+| 2026-05-11 | [`SESSIONS_SUMMARY/2026-05-11_v1_vs_v2_comparison_and_embeddings_setup.md`](./SESSIONS_SUMMARY/2026-05-11_v1_vs_v2_comparison_and_embeddings_setup.md) | SPO v1 vs v2 comparison (15 730 wspólnych URL, v1 +15% szybsze, triples Jaccard 0.10) + rozkład 51 typów Azure NER + setup Qwen3-Embedding-4B na Spark (orchestrator dual-container) |
 
 ## Konwencje
 

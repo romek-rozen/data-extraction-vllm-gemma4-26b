@@ -92,9 +92,37 @@ Cel: zmierzyć speedup vs koszt jakości one-step na obecnym promptcie/schemie v
 - [ ] Wpis do `DECISIONS.md` (uzupełnienie D7) z liczbami: speedup wall, per-URL latency, category/lang match %, Jaccard, fail rate
 - [ ] Decyzja: one-step prod-kandydat / odrzucony / dalsza iteracja promptu one-step
 
+## Phase 6 — Embeddings + HDBSCAN clustering
+
+Cel: przyspieszyć kategoryzację artykułów. Embedding → HDBSCAN → klastry → meta-kategorie.
+
+### Setup vLLM dual-container
+- [x] `scripts/start_vllm_llm_plus_embedding.py` — orchestrator dual-container (Gemma + Qwen embed) z health-wait, GPU_MEM=0.60/0.20 split na Sparku
+- [x] `scripts/embed_articles.py` — klient `/v1/embeddings` z idempotencją po url_hash, doc_text = `{h1}\n{summary}\n{strong ∪ central entities deduped}`
+- [x] Pobranie modelu: `hf download Qwen/Qwen3-Embedding-4B --local-dir ~/models/qwen3-embedding-4b` (~8 GB bf16)
+- [x] Decyzja modelu i dtype: 4B + bf16 (D30 — patrz `DECISIONS.md`)
+- [ ] Smoke `/v1/embeddings` na 5 doc po starcie kontenera
+- [ ] Pełen embedding 22 582 non-junk artykułów (`scripts/embed_articles.py --batch-size 16 --concurrency 8`)
+- [ ] Pomiar wall_s + docs/s; ETA dla 1M / 21M URL
+
+### Filtr typów encji do embedding (opcjonalnie)
+- [ ] Decyzja: czy odsiać 14 typów Azure NER <0.1% (`Height`, `Ordinal`, `OrganizationStockExchange`, `SetTemporal`, `DateTimeRange`, `IpAddress`, `DateTime`, `Airport`, `SportsEvent`, `TimeRange`, `Speed`, `Email`, `PhoneNumber`, `Area`)? Obecny default to strong ∪ central — weak pomijane.
+
+### HDBSCAN
+- [ ] `scripts/cluster_articles.py` — load `embeddings.npy` + `manifest.jsonl`, L2-norm + cosine→euclidean, HDBSCAN `min_cluster_size=20-50`
+- [ ] Output: `manifest_clustered.jsonl` + raport `clusters_summary.md` (top topics, top entities per cluster, n_noise)
+- [ ] Sanity check: ręczny eyeball top 10 klastrów (czy są semantyczne, czy zlepki nieskorelowanych)
+- [ ] Decyzja: czy klastry zastąpią/uzupełnią `category` z Gemma meta (`DECISIONS.md`)
+
+### LLM-judge eval SPO triples (po embeddings, ortogonalne)
+- [ ] `scripts/eval_triples_llm_judge.py` — 100-500 próbka, każda triple z v1 i v2 → judge prompt → score
+- [ ] Wyniki: precision/recall per pipeline, decyzja v1 vs v2 final (uzupełnienie D29)
+
 ## Otwarte decyzje
 
 - [x] `include_tables` w trafilatura (Phase 1 A/B)
 - [x] `max_model_len` (16384 wystarczy czy mniej dla większego batcha?)
 - [x] `max_num_seqs` na Sparku (start 8, do testu 16)
 - [ ] Streamlit dashboard (Phase 5+, opcjonalny)
+- [ ] SPO v1 vs v2 final (po LLM-judge eval; preliminary v1 — D29)
+- [ ] Filtrowanie weak/rare encji przed embedding (po pierwszym HDBSCAN runie)

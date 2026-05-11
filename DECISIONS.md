@@ -528,3 +528,111 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
 - **Oparte na:** spec/pomiar/issue.
 - **Status:** final / do walidacji w Phase X / tentative.
 ```
+
+---
+
+### D29: SPO v1 (cram) vs v2 (split) — pełen-cache porównanie, v1 preliminarily wygrywa
+- **Co:** Po smoke z D25 (n=10) zdecydowano się sprawdzić oba na pełnym sample.
+  v1 (cram) skończył pełen run 25 667 URL w 34h14min (4.80 s/URL).
+  v2 (split) leciał ~24h i doszedł do ~56% (15 730 URL final, 5.53 s/URL). Killed
+  o 2026-05-11 11:33 — wystarczy do porównania 1:1 po `url_hash`.
+- **Wyniki (15 730 URL intersection, `scripts/compare_v1_vs_v2.py`):**
+  | metryka | wartość | komentarz |
+  |---|---|---|
+  | `is_junk` agreement | 99.89% | klasyfikator stabilny |
+  | language agreement | 99.99% | praktycznie identyczne |
+  | category agreement (exact str) | 93.39% | OK |
+  | sponsored bool agreement | 98.97% | bardzo wysokie |
+  | sponsored subtype agreement | 98.34% | wysokie |
+  | title len p50 | 57 vs 57 | identyczne rozkłady |
+  | meta_description len p50 | 151 vs 151 | identyczne |
+  | entities/article (mean) | 12.43 vs 12.69 | v2 +2% (ogon dłuższy) |
+  | n_central/article (mean) | 1.83 vs 2.09 | v2 +14% |
+  | **entities Jaccard** (mean/p50) | **0.47 / 0.46** | pokrycie umiarkowane |
+  | **triples Jaccard** (mean/p50) | **0.10 / 0.06** | wariantywność surface form |
+  | wall_s per URL | **4.80** | **5.53** | **v1 +15.2% szybsze** |
+
+- **Dlaczego v1 szybsze:** jeden LLM call (entities+spo razem) vs dwa osobne calle
+  w v2 (entities_only → spo_pipe). Pozostałe stage'y (classify/meta/sponsored)
+  identyczne w obu pipeline'ach. Klasyczny trade-off: jeden round-trip + jeden prefix
+  cache hit vs dwa.
+- **Triples Jaccard 0.10** to alarmujący sygnał — modele generują różne triples
+  nawet dla tego samego artykułu. Nie wiadomo czy "różne" znaczy "różne fakty" czy
+  "te same fakty, inny zapis" (np. `died_in` vs `died-in`, "Krzysztof Krawczyk zmarł
+  w kwietniu 2021" vs "Krzysztof Krawczyk zmarł w 2021"). Wymagałoby LLM-judge eval
+  żeby ocenić semantycznie.
+- **Decyzja (PRELIMINARILY, override D25):** v1 jako default. v1 jest 15% szybsze
+  i równoważne jakościowo dla wszystkich łatwo-mierzalnych metryk (junk/lang/category/
+  sponsored/meta). Główna różnica to triples — Jaccard 0.10 znaczy że żaden z nich
+  nie jest "lepszy" w prosty sposób, oba są niedeterministyczne na poziomie surface
+  form. Wybór v2 nie jest uzasadniony dopóki LLM-judge nie pokaże że v2 daje istotnie
+  trafniejsze relacje.
+- **Konsekwencja dla prod (21M URL):** v1 oszczędza ~15% wall = ~5 dni na 1M URL,
+  ~100 dni na 21M URL przy obecnym tempie Sparka. Istotne dla deadline'ów.
+- **Final decision:** wymaga LLM-judge eval na 100-500 próbce triples (mierzyć:
+  faithfulness, completeness). Wpis docelowy do D{N+1} po runie eval.
+- **Oparte na:** session 2026-05-11 (`SESSIONS_SUMMARY/2026-05-11_v1_vs_v2_comparison_and_embeddings_setup.md`),
+  pełne dane w `final_results/2026-05-11_11-34-30__compare_v1_vs_v2/{joined.jsonl,report.md}`.
+- **Status:** preliminary, wymaga semantic eval triples.
+
+---
+
+### D30: Qwen3-Embedding-4B na DGX Spark w bf16 (nie NVFP4, nie 8B)
+- **Co:** Wybór modelu embeddingowego do clusteringu artykułów (h1 + summary +
+  entities → wektor → HDBSCAN). Trzy decyzje w jednym:
+  1. **Qwen3-Embedding-4B** zamiast 8B
+  2. **bf16** zamiast jakiejkolwiek kwantyzacji (FP4/FP8/Q8/Q4)
+  3. **Współdzielenie GPU z Gemma** (oba kontenery naraz, memory split 0.60/0.20)
+- **Dlaczego 4B nie 8B:**
+  - MTEB różnica 4B vs 8B ~1-2 pkt na większości tasks — nieistotne dla HDBSCAN
+    na 22k krótkich doc'ów (mean 412 znaków po build_doc_text).
+  - Wagi: 4B = ~8 GB bf16 vs 8B = ~16 GB → 2× szybsze inference, 2× szybsze
+    pobranie z HF.
+  - Zmieści się obok Gemmy w unified memory Sparka (121 GB) z GPU_MEM=0.20
+    (~24 GB) bez restartu Gemmy.
+- **Dlaczego bf16 nie kwantyzacja:**
+  - Embedding modele NIE mają oficjalnych wersji NVFP4/FP8 (Qwen nie publikuje,
+    żaden mainstreamowy embedder też nie). Kwantyzacja embedderów poniżej FP8
+    powoduje znaczną degradację jakości (llama.cpp discussion #16578).
+  - **NVFP4 nie przyspieszyłoby tu nic** — embedding to forward-only, krótkie
+    sekwencje (~150 tokenów per doc), pamięciowo-bound. NVFP4 daje ~4× compute
+    speedup, ale compute nie jest tu wąskim gardłem.
+  - Blackwell GB10 (sm_121) ma natywne bf16 tensor cores — żadnej emulacji,
+    pełna prędkość.
+- **Dlaczego dual-container z Gemmą:** Produkcyjny flow potrzebuje obu modeli
+  jednocześnie (Gemma do ekstrakcji nowych artykułów, Qwen embed do indeksowania
+  istniejących). Restart Gemmy = strata ~3 min + utrata prefix cache + niepotrzebny
+  shutdown przy pełnym kontenerze.
+- **Memory split (gpu-memory-utilization to udział TOTAL z 121 GB unified):**
+  - Gemma `GPU_MEM_LLM=0.60` → ~73 GB (wagi NVFP4 ~13 GB + KV fp8 24k×32seq + activations)
+  - Qwen embed `GPU_MEM_EMB=0.20` → ~24 GB (wagi bf16 ~8 GB + KV bf16 8k + scratch)
+  - Suma 0.80 → ~97 GB; zostaje ~25 GB systemowi/dla buforów I/O
+- **Image:** `nvcr.io/nvidia/vllm:26.02-py3` (NGC oficjalny dla embed; gemma4-cu130
+  zostaje dla Gemmy bo ma patch sm_121).
+- **vLLM flagi krytyczne:** `--task embed --dtype bfloat16 --trust-remote-code`.
+  BEZ `--quantization`, `--moe-backend` (nie MoE), `--kv-cache-dtype`,
+  `--reasoning-parser`, chat-template kwargs — to nie generative model.
+- **Alternatywy odrzucone:**
+  - **Qwen3-Embedding-0.6B:** byłoby OK dla retrieval/STS, ale dla PL artykułów
+    z nazwami własnymi (polskie organizacje, lokalizacje) różnica 0.6B vs 4B
+    zauważalna w jakości klastrowania. Niewart oszczędności ~6 GB VRAM.
+  - **Qwen3-Embedding-8B:** za duże dla tego use case (HDBSCAN nie potrzebuje
+    monstrum), wolniejsze, brak miejsca obok Gemmy bez restartu.
+  - **BGE-M3 / multilingual-e5-large:** rozważane wcześniej, ale Qwen3-Embedding
+    ma lepsze polish-language coverage (Qwen treningowy mix > FlagEmbedding) i
+    wyższy MTEB-PL.
+- **Doc_text format dla embedding** (`scripts/embed_articles.py:build_doc_text`):
+  ```
+  {h1}
+  {article_summary}
+  {strong ∪ central entities, deduped, comma-separated}
+  ```
+  Weak non-central encje (numbers, dates, percentages, units) **pomijane** — szum
+  dla clusteringu, nie dają sygnału tematycznego.
+- **Orchestrator:** `scripts/start_vllm_llm_plus_embedding.py` startuje oba
+  kontenery, pollinguje healthcheck, drukuje `[OK]` po starcie. Solo-mode dla
+  Gemmy zostaje w `scripts/start_vllm.sh` (niezmieniony, GPU_MEM=0.85).
+- **Oparte na:** session 2026-05-11, research na vLLM/Spark/Qwen3 embedding flags,
+  rozmiar modelu z HF model card.
+- **Status:** wdrażane, czeka na pierwszy pełen run embedding (22 582 doc).
+
