@@ -8,7 +8,7 @@
 #
 # Memory split (gpu-memory-utilization to udział TOTAL pamięci):
 #   Gemma  GPU_MEM_LLM=0.60  → ~73 GB (wagi NVFP4 ~13 GB + KV fp8 24k×32seq + activations)
-#   Qwen   GPU_MEM_EMB=0.30  → ~36 GB (wagi bf16 ~8 GB + KV bf16 8k + scratch + compile cache)
+#   Qwen   GPU_MEM_EMB=0.30  → ~36 GB (wagi bf16 ~8 GB + KV bf16 4k + scratch + compile cache)
 #   Suma   0.90              → ~109 GB; zostaje ~12 GB systemowi
 # UWAGA: gpu_memory_utilization w vLLM 0.15 liczy się względem WOLNEJ pamięci
 # przy starcie kontenera, nie totalu — więc Qwen widzi mniej niż 0.30*121GB,
@@ -36,8 +36,11 @@ LLM_IMAGE="${LLM_IMAGE:-vllm/vllm-openai:gemma4-cu130}"
 GPU_MEM_LLM="${GPU_MEM_LLM:-0.60}"
 
 # ---- Embedding (Qwen3) ----
+# bf16 oficjalny. FP8 chroma-core testowany 2026-05-11 → 9% wolniej na sm_121
+# (CUTLASS fp8 kernel istnieje, ale dequant overhead zjada zysk z mniejszych wag).
+# Override przez env jeśli kiedyś będzie sensowna alternatywa.
 SIZE="${SIZE:-4B}"
-EMB_HF_ID="Qwen/Qwen3-Embedding-${SIZE}"
+EMB_HF_ID="${EMB_HF_ID:-Qwen/Qwen3-Embedding-${SIZE}}"
 EMB_MODEL_DIR="${EMB_MODEL_DIR:-$HOME/models/qwen3-embedding-${SIZE,,}}"
 EMB_PORT="${EMB_PORT:-8002}"
 EMB_NAME="${EMB_NAME:-vllm-qwen3-embed}"
@@ -64,54 +67,78 @@ for p in "$LLM_PORT" "$EMB_PORT"; do
   fi
 done
 
-# Idempotent restart
-docker rm -f "$LLM_NAME" "$EMB_NAME" 2>/dev/null || true
+# Healthcheck: kontener running + /v1/models odpowiada → uznajemy za zdrowy, skip.
+is_healthy() {
+  local name="$1" port="$2"
+  docker ps --filter "name=^${name}$" --format '{{.Names}}' | grep -q "$name" || return 1
+  curl -sf "http://localhost:$port/v1/models" >/dev/null 2>&1
+}
 
 # ---- Start Gemma 4 ----
-LLM_PATCH="$LLM_MODEL_DIR/gemma4_patched.py"
-if [[ -f "$LLM_PATCH" ]]; then
-  PATCH_MOUNT=(-v "$LLM_PATCH:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/gemma4.py")
-  echo "[gemma] patch sm_121: $LLM_PATCH"
+if is_healthy "$LLM_NAME" "$LLM_PORT"; then
+  echo "[gemma] już działa zdrowo na :$LLM_PORT — skip"
+  LLM_SKIPPED=1
 else
-  PATCH_MOUNT=()
-  echo "[gemma] WARN: brak patcha sm_121 ($LLM_PATCH) — startuję bez"
+  docker rm -f "$LLM_NAME" 2>/dev/null || true
+  LLM_PATCH="$LLM_MODEL_DIR/gemma4_patched.py"
+  if [[ -f "$LLM_PATCH" ]]; then
+    PATCH_MOUNT=(-v "$LLM_PATCH:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/gemma4.py")
+    echo "[gemma] patch sm_121: $LLM_PATCH"
+  else
+    PATCH_MOUNT=()
+    echo "[gemma] WARN: brak patcha sm_121 ($LLM_PATCH) — startuję bez"
+  fi
+  echo "[gemma] start na :$LLM_PORT  GPU_MEM=$GPU_MEM_LLM"
+  docker run -d --gpus all --ipc=host \
+    --name "$LLM_NAME" \
+    -v "$LLM_MODEL_DIR":/model \
+    "${PATCH_MOUNT[@]}" \
+    -p "$LLM_PORT":8000 \
+    "$LLM_IMAGE" \
+    --model /model \
+    --quantization modelopt \
+    --kv-cache-dtype fp8 \
+    --max-model-len 24576 \
+    --max-num-seqs 32 \
+    --max-num-batched-tokens 16384 \
+    --gpu-memory-utilization "$GPU_MEM_LLM" \
+    --moe-backend marlin \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --default-chat-template-kwargs '{"enable_thinking": false}' >/dev/null
 fi
 
-echo "[gemma] start na :$LLM_PORT  GPU_MEM=$GPU_MEM_LLM"
-docker run -d --gpus all --ipc=host \
-  --name "$LLM_NAME" \
-  -v "$LLM_MODEL_DIR":/model \
-  "${PATCH_MOUNT[@]}" \
-  -p "$LLM_PORT":8000 \
-  "$LLM_IMAGE" \
-  --model /model \
-  --quantization modelopt \
-  --kv-cache-dtype fp8 \
-  --max-model-len 24576 \
-  --max-num-seqs 32 \
-  --max-num-batched-tokens 16384 \
-  --gpu-memory-utilization "$GPU_MEM_LLM" \
-  --moe-backend marlin \
-  --enable-prefix-caching \
-  --enable-chunked-prefill \
-  --default-chat-template-kwargs '{"enable_thinking": false}' >/dev/null
-
 # ---- Start Qwen3-Embedding ----
-echo "[qwen-embed] start na :$EMB_PORT  GPU_MEM=$GPU_MEM_EMB  size=$SIZE"
-# Obraz nvcr.io/nvidia/vllm ma generyczny entrypoint (nvidia_entrypoint.sh),
-# więc trzeba jawnie podać `vllm serve` — inaczej exec --model = błąd.
-docker run -d --gpus all --ipc=host \
-  --name "$EMB_NAME" \
-  -v "$EMB_MODEL_DIR":/model \
-  -p "$EMB_PORT":8000 \
-  "$EMB_IMAGE" \
-  vllm serve /model \
-  --served-model-name "$EMB_HF_ID" \
-  --runner pooling \
-  --dtype bfloat16 \
-  --trust-remote-code \
-  --gpu-memory-utilization "$GPU_MEM_EMB" \
-  --max-model-len "$EMB_MAX_LEN" >/dev/null
+if is_healthy "$EMB_NAME" "$EMB_PORT"; then
+  echo "[qwen-embed] już działa zdrowo na :$EMB_PORT — skip"
+  EMB_SKIPPED=1
+else
+  docker rm -f "$EMB_NAME" 2>/dev/null || true
+  echo "[qwen-embed] start na :$EMB_PORT  GPU_MEM=$GPU_MEM_EMB  size=$SIZE"
+  # Obraz nvcr.io/nvidia/vllm ma generyczny entrypoint (nvidia_entrypoint.sh),
+  # więc trzeba jawnie podać `vllm serve` — inaczej exec --model = błąd.
+  docker run -d --gpus all --ipc=host \
+    --name "$EMB_NAME" \
+    -v "$EMB_MODEL_DIR":/model \
+    -p "$EMB_PORT":8000 \
+    "$EMB_IMAGE" \
+    vllm serve /model \
+    --served-model-name "$EMB_HF_ID" \
+    --runner pooling \
+    --dtype bfloat16 \
+    --trust-remote-code \
+    --gpu-memory-utilization "$GPU_MEM_EMB" \
+    --max-model-len "$EMB_MAX_LEN" \
+    --max-num-batched-tokens 8192 \
+    --max-num-seqs 256 >/dev/null
+fi
+
+# Jeśli oba zdrowe — nie ma na co czekać.
+if [[ "${LLM_SKIPPED:-0}" == "1" && "${EMB_SKIPPED:-0}" == "1" ]]; then
+  echo
+  echo "[DONE] oba serwery już działały — nic nie restartowane."
+  exit 0
+fi
 
 echo
 echo "[wait] oba kontenery startują, polling /v1/models... "

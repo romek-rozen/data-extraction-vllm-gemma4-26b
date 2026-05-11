@@ -2,6 +2,26 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-11 (14:30) — embedding throughput ceiling + FP8 odrzucony (D31)
+
+**Sufit wydolności Qwen3-Embedding-4B bf16 na Spark GB10: ~54 docs/s.** Sweep
+ustawień klienta (batch 32-256, conc 4-32) wszystko daje 53-56 docs/s. Server-side
+prompt throughput ~9 400 tok/s, GPU compute utilization ~30%, KV cache 15%,
+scheduler nie limit'uje (Running 47 z max_num_seqs=256). Wąskie gardło: memory
+bandwidth + brak full cudagraphs dla pooling (vLLM forced PIECEWISE).
+
+**Test FP8 (`chroma-core/Qwen3-Embedding-4B-FP8-Dynamic`) → odrzucony.** Hipoteza
+że fp8 da 2× throughput okazała się błędna: **49 docs/s, 9% wolniej** niż bf16.
+Semantyka zachowana (cross-lingual cosine 0.8623 vs 0.8645 bf16). Powód: na sm_121
+runtime dequant fp8→bf16 dla matmul zżera zysk z mniejszych wag, kernel
+`CutlassFP8ScaledMMLinearKernel` nie jest tak zoptymalizowany jak natywny NVFP4.
+Decyzja: `DECISIONS.md` D31. Defaulty cofnięte do bf16 we wszystkich 3 skryptach.
+
+**Implikacja na pełną skalę 21M URL:** 4.5 dnia tylko embedding @ 54 docs/s.
+Do rewizji: Qwen3-Embedding-0.6B albo sharded inference na wielu GPU.
+
+Szczegóły pomiarów: [`OBSERVATIONS/2026-05-11_13-30__embedding_throughput_ceiling.md`](OBSERVATIONS/2026-05-11_13-30__embedding_throughput_ceiling.md).
+
 ## 2026-05-11 (13:00) — embedding runtime fixes + pierwszy pełen embed run
 
 **`scripts/start_vllm_llm_plus_embedding.py` — 3 fixy żeby Qwen3-Embedding w ogóle wstał:**

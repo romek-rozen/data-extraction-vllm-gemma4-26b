@@ -57,9 +57,10 @@ def build_doc_text(rec: dict) -> tuple[str, int, int]:
     return "\n".join(parts), len(selected), n_central
 
 
-def call_embed(session: requests.Session, url: str, model: str, batch: list[str], timeout: int = 120) -> list[list[float]]:
+def call_embed(session: requests.Session, url: str, model: str, batch: list[str]) -> list[list[float]]:
+    # Brak timeout: localhost embed, server crash → ConnectionError i tak wywali skrypt.
     payload = {"model": model, "input": batch}
-    r = session.post(url, json=payload, timeout=timeout)
+    r = session.post(url, json=payload)
     r.raise_for_status()
     data = r.json()["data"]
     return [d["embedding"] for d in data]

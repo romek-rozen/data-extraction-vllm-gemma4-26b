@@ -634,5 +634,58 @@ Log kluczowych decyzji technicznych projektu. Każdy wpis: **co, dlaczego, kiedy
   Gemmy zostaje w `scripts/start_vllm.sh` (niezmieniony, GPU_MEM=0.85).
 - **Oparte na:** session 2026-05-11, research na vLLM/Spark/Qwen3 embedding flags,
   rozmiar modelu z HF model card.
-- **Status:** wdrażane, czeka na pierwszy pełen run embedding (22 582 doc).
+- **Status:** wdrożone. Pierwszy pełen run: 22 582 doc, 53.7 docs/s, wall 7:00.
+- **Amendment 2026-05-11 (runtime fixes):** w trakcie startu okazało się że flagi
+  z D30 trzeba uściślić:
+  - `--task embed` → `--runner pooling` (vLLM 0.15.1 zmienił nazwę flagi)
+  - `vllm serve /model ...` jawnie podane jako komenda (obraz `nvcr.io/nvidia/vllm`
+    ma generyczny entrypoint NVIDIA, nie `vllm/vllm-openai`)
+  - `GPU_MEM_EMB=0.20` → `0.30` (Available KV cache memory ujemny przy 0.20;
+    gpu_memory_utilization liczy się względem WOLNEJ pamięci przy starcie, nie
+    totalu — Gemma już zjadła swoje przed Qwenem)
+  - `EMB_MAX_LEN=8192` → `4096` (przy 0.30 KV cache wystarcza dopiero na 4096,
+    a artykuły rzadko mają więcej niż 4k tok)
+  - `--max-num-batched-tokens 8192` (default 2048 → zmiana nic nie dała na
+    throughput, ale jawnie ustawione dla repeatability)
+  - `--max-num-seqs 256` (jawnie ustawione, default i tak 256)
+  - Healthcheck w orchestratorze: jeśli kontener już działa zdrowo, `skip` zamiast
+    restart (`scripts/start_vllm_llm_plus_embedding.py:is_healthy`)
+- **Sufit wydolności:** 54 docs/s na bf16, server-side ~9000 tok/s, GPU compute
+  utilization ~30%. Wąskie gardło: memory bandwidth + brak full cudagraphs dla
+  pooling. Pełna skala 21M URL → ~4.5 dnia tylko embedding. Patrz
+  `OBSERVATIONS/2026-05-11_13-30__embedding_throughput_ceiling.md`.
+
+---
+
+### D31: FP8 chroma-core embedder ODRZUCONY na Spark GB10 (zostajemy z bf16)
+
+- **Co:** Testowany `chroma-core/Qwen3-Embedding-4B-FP8-Dynamic` (community fp8
+  quant, format compressed-tensors, W8A8) jako potencjalna optymalizacja względem
+  bf16 z D30.
+- **Hipoteza:** memory-bandwidth-bound workload → fp8 wagi (2× mniej pamięci) →
+  ~2× throughput.
+- **Wynik pomiarów (2026-05-11):**
+  - bf16 (Qwen/Qwen3-Embedding-4B): **54 docs/s**, prompt throughput ~9 400 tok/s
+  - fp8 (chroma-core W8A8): **49 docs/s** (9% wolniej), prompt throughput ~9 800 tok/s
+  - Semantyka zachowana: cross-lingual cosine PL↔EN 0.8645 (bf16) → 0.8623 (fp8),
+    delta < 0.3% — fp8 nie psuje jakości
+- **Dlaczego fp8 nie przyspiesza na sm_121:**
+  - vLLM wybiera `CutlassFP8ScaledMMLinearKernel` ale runtime dtype activations
+    zostaje bf16 (`dtype=torch.bfloat16, quantization=compressed-tensors`)
+  - Dequant overhead fp8→bf16 przy każdym matmul zżera zysk z mniejszych wag
+  - GB10 ma fp8 tensor cores ale CompressedTensorsW8A8 path nie jest tak
+    zoptymalizowany jak natywny NVFP4 ModelOpt (jak w Gemmie)
+- **Co by faktycznie przyspieszyło (nie testowane, do rozważenia jeśli pełna
+  skala wymaga):**
+  - NVFP4-quantowany embedder (ale Qwen nie publikuje, community też nie ma na HF)
+  - Mniejszy model (Qwen3-Embedding-0.6B — D30 odrzucił dla jakości, do
+    rewizji przy 21M scale)
+  - Sharded inference na wielu GPU (kilka Spark/5090)
+- **Decyzja:** **bf16 zostaje defaultem.** Defaulty w `start_vllm_llm_plus_embedding.py`,
+  `embed_articles.py`, `smoke_test_embedding.sh` cofnięte do `Qwen/Qwen3-Embedding-4B`.
+  Komentarz w skrypcie zachowuje notatkę o teście fp8 żeby nie wracać do tego
+  bez nowego powodu.
+- **Oparte na:** session 2026-05-11 — bench runs `runs/embed_fp8_bench/` vs
+  `runs/embed_v1_full_b8k/`, logi serwera vLLM, `OBSERVATIONS/2026-05-11_13-30__embedding_throughput_ceiling.md`.
+- **Status:** zatwierdzone, bf16 jest produkcyjnym defaultem.
 
