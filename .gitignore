@@ -11,6 +11,7 @@ final_result*/
 final_results/
 benchmark_results/
 scraper_logs/
+runs/
 
 # Python
 __pycache__/

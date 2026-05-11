@@ -2,6 +2,32 @@
 
 Format: data + krótkie streszczenie zmian. Pełne podsumowania per sesja w [`SESSIONS_SUMMARY/`](SESSIONS_SUMMARY/).
 
+## 2026-05-11 (13:00) — embedding runtime fixes + pierwszy pełen embed run
+
+**`scripts/start_vllm_llm_plus_embedding.py` — 3 fixy żeby Qwen3-Embedding w ogóle wstał:**
+1. Obraz `nvcr.io/nvidia/vllm:26.02-py3` ma generyczny entrypoint NVIDIA — argumenty
+   `--model ...` trafiały do `exec` jako komenda zamiast do vLLM. Fix: jawnie podaję
+   `vllm serve /model ...` po nazwie obrazu.
+2. `--task embed` nierozpoznane w vLLM 0.15.1 (renamed). Fix: `--runner pooling`.
+3. `GPU_MEM_EMB=0.20` za mało (`Available KV cache memory: -4.7 GiB`) — gpu_memory_utilization
+   liczy się względem WOLNEJ pamięci przy starcie kontenera, więc Qwen widzi mniej niż
+   0.20×121GB bo Gemma już zjadła swoje. Podniesione do **0.30**.
+4. `EMB_MAX_LEN=8192` o włos za dużo (1.12 GiB KV vs 1.03 GiB available). Obniżone do
+   **4096** — artykuły rzadko przekraczają 4k tokenów, dla dłuższych embed chunkuje.
+
+**Nowe: `scripts/smoke_test_embedding.sh`** — sanity dla `:8002`. Testuje single embed
+(dim=2560), batch embed (3 inputy), cross-lingual cosine similarity (PL↔EN witamina D
+= 0.86 vs PL unrelated = 0.47).
+
+**`scripts/embed_articles.py`** — default `--model` poprawiony z `Qwen3-Embedding-0.6B`
+na `Qwen3-Embedding-4B` (zgodnie z tym co startujemy).
+
+**Pierwszy pełen embed run v1**: 22 582 docs × 2560 dim, throughput ~56 docs/s
+(batch=64, conc=8), wall ~7 min. Output: `runs/embed_v1_full/{embeddings.npy,
+manifest.jsonl, meta.json}` (gitignored).
+
+Szczegóły: [`SESSIONS_SUMMARY/2026-05-11_embedding_runtime_fixes.md`](SESSIONS_SUMMARY/2026-05-11_embedding_runtime_fixes.md).
+
 ## 2026-05-11 (12:30) — v1 vs v2 comparison na pełnym cache + Qwen3-Embedding setup
 
 **SPO v1 vs v2 — porównanie 1:1 na 15 730 wspólnych URL** (z 25 668 z `websites_cache/`).

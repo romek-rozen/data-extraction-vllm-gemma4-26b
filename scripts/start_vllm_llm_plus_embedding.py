@@ -8,8 +8,11 @@
 #
 # Memory split (gpu-memory-utilization to udział TOTAL pamięci):
 #   Gemma  GPU_MEM_LLM=0.60  → ~73 GB (wagi NVFP4 ~13 GB + KV fp8 24k×32seq + activations)
-#   Qwen   GPU_MEM_EMB=0.20  → ~24 GB (wagi bf16 ~8 GB + KV bf16 8k + scratch)
-#   Suma   0.80              → ~97 GB; zostaje ~25 GB systemowi
+#   Qwen   GPU_MEM_EMB=0.30  → ~36 GB (wagi bf16 ~8 GB + KV bf16 8k + scratch + compile cache)
+#   Suma   0.90              → ~109 GB; zostaje ~12 GB systemowi
+# UWAGA: gpu_memory_utilization w vLLM 0.15 liczy się względem WOLNEJ pamięci
+# przy starcie kontenera, nie totalu — więc Qwen widzi mniej niż 0.30*121GB,
+# bo Gemma już zjadła swoje. 0.20 było za mało → KV=-4.7GB.
 #
 # UWAGA: start_vllm.sh ma hardkodowane 0.85 — NIE uruchamiamy go tutaj,
 # zamiast tego inline'ujemy komendę z naszym GPU_MEM_LLM.
@@ -39,8 +42,8 @@ EMB_MODEL_DIR="${EMB_MODEL_DIR:-$HOME/models/qwen3-embedding-${SIZE,,}}"
 EMB_PORT="${EMB_PORT:-8002}"
 EMB_NAME="${EMB_NAME:-vllm-qwen3-embed}"
 EMB_IMAGE="${EMB_IMAGE:-nvcr.io/nvidia/vllm:26.02-py3}"
-GPU_MEM_EMB="${GPU_MEM_EMB:-0.20}"
-EMB_MAX_LEN="${EMB_MAX_LEN:-8192}"
+GPU_MEM_EMB="${GPU_MEM_EMB:-0.30}"
+EMB_MAX_LEN="${EMB_MAX_LEN:-4096}"
 
 # Sanity: oba modele pobrane
 for d in "$LLM_MODEL_DIR" "$EMB_MODEL_DIR"; do
@@ -104,14 +107,15 @@ docker run -d --gpus all --ipc=host \
   "$EMB_IMAGE" \
   vllm serve /model \
   --served-model-name "$EMB_HF_ID" \
-  --task embed \
+  --runner pooling \
   --dtype bfloat16 \
   --trust-remote-code \
   --gpu-memory-utilization "$GPU_MEM_EMB" \
   --max-model-len "$EMB_MAX_LEN" >/dev/null
 
 echo
-echo "[wait] oba kontenery startują, polling /v1/models..."
+echo "[wait] oba kontenery startują, polling /v1/models... "
+echo "[wait] docker logs -f vllm-qwen3-embed"
 
 wait_ready() {
   local name="$1" port="$2" timeout="${3:-600}" t0 now

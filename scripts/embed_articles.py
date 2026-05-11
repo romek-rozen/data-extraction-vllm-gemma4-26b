@@ -70,7 +70,7 @@ def main():
     ap.add_argument("--source", default="final_results/2026-05-09_00-21-48__spo_v1_mns32_full/final.jsonl")
     ap.add_argument("--out", required=True, help="output dir")
     ap.add_argument("--endpoint", default="http://127.0.0.1:8002/v1/embeddings")
-    ap.add_argument("--model", default="Qwen/Qwen3-Embedding-0.6B")
+    ap.add_argument("--model", default="Qwen/Qwen3-Embedding-4B")
     ap.add_argument("--batch-size", type=int, default=32, help="docs per HTTP call")
     ap.add_argument("--concurrency", type=int, default=8, help="parallel batches in flight")
     ap.add_argument("--limit", type=int, default=0, help="0 = all eligible rows")
